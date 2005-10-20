@@ -154,10 +154,8 @@ void Reset(ArgStruct *p)
 
 void AfterAlignmentInit(ArgStruct *p)
 {
-
   /* After mallocs and alignment, we need to create MPI Window */
 
   MPI_Win_create(p->r_buff, p->bufflen, 1, NULL, MPI_COMM_WORLD, &win);
-
 }
 

@@ -11,7 +11,11 @@
 /*     * memcpy.c           ---- single process memory copy                  */
 /*****************************************************************************/
 #include    "netpipe.h"
-#undef SPLIT_MEMCPY
+/*#undef SPLIT_MEMCPY*/
+
+#ifdef USE_MP_MEMCPY
+void MP_memcpy();
+#endif
 
 
 void Init(ArgStruct *p, int* pargc, char*** pargv)
@@ -67,30 +71,14 @@ void SendData(ArgStruct *p)
     int nbytes = p->bufflen, nleft;
     char *src = p->s_ptr, *dest = p->r_ptr;
 
-#ifndef SPLIT_MEMCPY
+#ifdef USE_MP_MEMCPY
 
-    memcpy(dest, src, nbytes);
+    MP_memcpy(dest, src, nbytes);
 
 #else
 
-/* Alternately try splitting the memcpy to copy the body then the
- * remainder that is not divisible by 8 bytes.  glibc memcpy under
- * RedHat Linux is less efficient if the size is not divisible by 4 bytes.
- */
-
-    nleft = nbytes%8;
-    nbytes -= nleft;
-
     memcpy(dest, src, nbytes);
 
-    if( nleft > 0 ) {
-
-        src  += nbytes;
-        dest += nbytes;
-
-        memcpy(dest, src, nleft);
-
-    }
 #endif
 }
 
@@ -99,30 +87,14 @@ void RecvData(ArgStruct *p)
     int nbytes = p->bufflen, nleft;
     char *src = p->s_ptr, *dest = p->r_ptr;
 
-#ifndef SPLIT_MEMCPY
+#ifdef USE_MP_MEMCPY
 
-    memcpy(src, dest, nbytes);
+    MP_memcpy(src, dest, nbytes);
 
 #else
 
-/* Alternately try splitting the memcpy to copy the body then the
- * remainder that is not divisible by 8 bytes.  glibc memcpy under
- * RedHat Linux is less efficient if the size is not divisible by 4 bytes.
- */
-
-    nleft = nbytes%8;
-    nbytes -= nleft;
-
     memcpy(src, dest, nbytes);
 
-    if( nleft > 0 ) {
-
-        src  += nbytes;
-        dest += nbytes;
-
-        memcpy(src, dest, nleft);
-
-    }
 #endif
 }
 

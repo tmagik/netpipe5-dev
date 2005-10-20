@@ -164,11 +164,9 @@ void Setup(ArgStruct *p)
  
 
  /* Establish tcp connections */
-
  establish(p);
 
  /* Initialize Mellanox Infiniband */
-
  if(initIB(p) == -1) {
    CleanUp(p);
    exit(-1);
@@ -370,7 +368,7 @@ int initIB(ArgStruct *p)
   qp_attr.sq_psn = 0;
   QP_ATTR_MASK_SET(qp_attr_mask, QP_ATTR_SQ_PSN);
 
-  qp_attr.timeout = 31;
+  qp_attr.timeout = 0x20;
   QP_ATTR_MASK_SET(qp_attr_mask, QP_ATTR_TIMEOUT);
 
   qp_attr.retry_count = 1;
@@ -774,17 +772,17 @@ void Reset(ArgStruct *p)
 
 void SendTime(ArgStruct *p, double *t)
 {
-    uint32_t ltime, ntime;
+    unsigned long ltime, ntime;
 
     /*
       Multiply the number of seconds by 1e6 to get time in microseconds
       and convert value to an unsigned 32-bit integer.
       */
-    ltime = (uint32_t)(*t * 1.e6);
+    ltime = (unsigned long)(*t * 1.e6);
 
     /* Send time in network order */
     ntime = htonl(ltime);
-    if (write(p->commfd, (char *)&ntime, sizeof(uint32_t)) < 0)
+    if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
       {
         printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
         exit(301);
@@ -793,16 +791,16 @@ void SendTime(ArgStruct *p, double *t)
 
 void RecvTime(ArgStruct *p, double *t)
 {
-    uint32_t ltime, ntime;
+    unsigned long ltime, ntime;
     int bytesRead;
 
-    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(uint32_t));
+    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
     if (bytesRead < 0)
       {
         printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
         exit(302);
       }
-    else if (bytesRead != sizeof(uint32_t))
+    else if (bytesRead != sizeof(unsigned long))
       {
         fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
                 bytesRead);
@@ -816,12 +814,12 @@ void RecvTime(ArgStruct *p, double *t)
 
 void SendRepeat(ArgStruct *p, int rpt)
 {
-  uint32_t lrpt, nrpt;
+  unsigned long lrpt, nrpt;
 
   lrpt = rpt;
   /* Send repeat count as a long in network order */
   nrpt = htonl(lrpt);
-  if (write(p->commfd, (void *) &nrpt, sizeof(uint32_t)) < 0)
+  if (write(p->commfd, (void *) &nrpt, sizeof(unsigned long)) < 0)
     {
       printf("NetPIPE: write failed in SendRepeat: errno=%d\n", errno);
       exit(304);
@@ -830,16 +828,16 @@ void SendRepeat(ArgStruct *p, int rpt)
 
 void RecvRepeat(ArgStruct *p, int *rpt)
 {
-  uint32_t lrpt, nrpt;
+  unsigned long lrpt, nrpt;
   int bytesRead;
 
-  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(uint32_t));
+  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(unsigned long));
   if (bytesRead < 0)
     {
       printf("NetPIPE: read failed in RecvRepeat: errno=%d\n", errno);
       exit(305);
     }
-  else if (bytesRead != sizeof(uint32_t))
+  else if (bytesRead != sizeof(unsigned long))
     {
       fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
               bytesRead);
@@ -850,7 +848,7 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   *rpt = lrpt;
 }
 
-void establish(ArgStruct *p)
+int establish(ArgStruct *p)
 {
  int clen;
  int one = 1;
@@ -935,7 +933,7 @@ void AfterAlignmentInit(ArgStruct *p)
      if (bytesRead < 0) {
         perror("NetPIPE: read of buffer address failed in MyMalloc");
         exit(-1);
-     } else if (bytesRead != sizeof(uint32_t)) {
+     } else if (bytesRead != sizeof(unsigned long)) {
         perror("NetPIPE: partial read of buffer address in MyMalloc");
         exit(-1);
      }
@@ -946,7 +944,7 @@ void AfterAlignmentInit(ArgStruct *p)
      if (bytesRead < 0) {
         perror("NetPIPE: read of remote key failed in MyMalloc");
         exit(-1);
-     } else if (bytesRead != sizeof(uint32_t)) {
+     } else if (bytesRead != sizeof(unsigned long)) {
         perror("NetPIPE: partial read of remote key in MyMalloc");
         exit(-1);
      }

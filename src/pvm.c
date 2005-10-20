@@ -15,7 +15,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "$Id: pvm.c,v 1.6 2003/11/12 06:21:29 bsmith Exp $";
+    "$Id: pvm.c,v 1.7 2003/12/10 00:52:25 turner Exp $";
 #endif
 
 
@@ -52,8 +52,8 @@ Setup(ArgStruct *p)
 /*    starting it by hand on the other machine, we don't know what    */
 /*    the other task id is.                                           */
 /**********************************************************************/
-int
-establish(ArgStruct *p)
+
+void establish(ArgStruct *p)
 {
     /* Task information for the entire parallel machine (if trans) */
     int                     tasks_status;

@@ -21,6 +21,7 @@
 #include <sys/time.h>       /* struct timeval */
 #include <sys/resource.h>   /* getrusage() */
 #include <stdlib.h>         /* malloc(3) */
+#include <unistd.h>         /* getopt, read, write, ... */
 
 #ifdef INFINIBAND
 #include <ib_defs.h> /* ib_mtu_t */
@@ -172,6 +173,17 @@ enum communication_types {
   unsigned long *ltime, *lrpt;
   char *sync, *sync1;
 
+#elif defined(ATOLL)
+
+  #include <atoll.h>
+  
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct
+  {
+      port_id id_self,       /* My port id */
+              id_nbor;       /* My neighbor's port id */
+  }
+
 #elif defined(MEMCPY)
   typedef struct protocolstruct ProtocolStruct;
   struct protocolstruct { int nothing; };
@@ -180,10 +192,12 @@ enum communication_types {
   typedef struct protocolstruct ProtocolStruct;
   struct protocolstruct {
      char *dfile_name;
+     int read;
+     char read_type;   /* c-char  d-double  s-stream */
   };
 
 #else
-  #error "One of TCP, MPI, TCGMSG, LAPI, SHMEM or PVM must be defined during compilation"
+  #error "One of TCP, MPI, PVM, TCGMSG, LAPI, SHMEM, ATOLL, MEMCPY, DISK must be defined during compilation"
 
 #endif
 
@@ -207,13 +221,16 @@ struct argstruct
     char     *s_ptr;        /* Pointer to current location in send buffer    */
 
     int      bufflen,       /* Length of transmitted buffer                  */
+             upper,         /* Upper limit to bufflen                        */
              tr,rcv,        /* Transmit and Recv flags, or maybe neither     */
+             bidir,         /* Bi-directional flag                           */
              nbuff;         /* Number of buffers to transmit                 */
 
     int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
   
     int      reset_conn;    /* Reset connection flag                         */
 		int			soffset,roffset;
+	int syncflag; /* flag for using sync sends vs. normal sends in MPI mod*/
 
     /* Now we work with a union of information for protocol dependent stuff  */
     ProtocolStruct prot;
@@ -234,6 +251,8 @@ double When();
 void Init(ArgStruct *p, int* argc, char*** argv);
 
 void Setup(ArgStruct *p);
+
+void establish(ArgStruct *p);
 
 void Sync(ArgStruct *p);
 
@@ -280,3 +299,7 @@ void SaveRecvPtr(ArgStruct* p);
 void ResetRecvPtr(ArgStruct* p);
 
 void PrintUsage();
+
+int getopt( int argc, char * const argv[], const char *optstring);
+
+void AfterAlignmentInit( ArgStruct *p );

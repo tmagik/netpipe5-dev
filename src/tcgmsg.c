@@ -12,7 +12,6 @@
 /*****************************************************************************/
 #include    "netpipe.h"
 #include    <sndrcv.h>
-#include    <unistd.h>
 
 void RCV_(long *type, void *buf, long *lenbuf, long *lenmes, long *nodesel, long *nodefrom, long *sync);
 void SND_(long *type, void *buf, long *lenbuf, long *node, long *sync);

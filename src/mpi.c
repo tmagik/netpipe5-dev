@@ -75,7 +75,13 @@ void Setup(ArgStruct *p)
         exit(-1);
     }
     MPI_Buffer_attach(messbuff, MAXBUFSIZE);
+    p->upper = MAXBUFSIZE;
 #endif
+
+    if( p->bidir ) {
+        printf("MPI implementations do not have to guarantee message progress.\n");
+        printf("You may need to run using -a to avoid locking up.\n\n");
+    }
 }   
 
 void Sync(ArgStruct *p)
@@ -109,7 +115,10 @@ void SendData(ArgStruct *p)
 #ifdef BSEND
     MPI_Bsend(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
 #else
-    MPI_Send(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
+   if(p->syncflag)
+      MPI_Ssend(p->s_ptr,p->bufflen, MPI_BYTE, p->prot.nbor,1,MPI_COMM_WORLD);
+   else
+      MPI_Send(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
 #endif
 }
 
@@ -131,11 +140,7 @@ void RecvData(ArgStruct *p)
 
 void SendTime(ArgStruct *p, double *t)
 {
-#ifdef BSEND
-    MPI_Bsend(t, 1, MPI_DOUBLE, p->prot.nbor, 2, MPI_COMM_WORLD);
-#else
     MPI_Send(t, 1, MPI_DOUBLE, p->prot.nbor, 2, MPI_COMM_WORLD);
-#endif
 }
 
 void RecvTime(ArgStruct *p, double *t)
@@ -148,11 +153,7 @@ void RecvTime(ArgStruct *p, double *t)
 
 void SendRepeat(ArgStruct *p, int rpt)
 {
-#ifdef BSEND
-    MPI_Bsend(&rpt, 1, MPI_INT, p->prot.nbor, 2, MPI_COMM_WORLD);
-#else
     MPI_Send(&rpt, 1, MPI_INT, p->prot.nbor, 2, MPI_COMM_WORLD);
-#endif
 }
 
 void RecvRepeat(ArgStruct *p, int *rpt)

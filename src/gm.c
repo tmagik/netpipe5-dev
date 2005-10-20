@@ -48,7 +48,7 @@ void my_send_callback (struct gm_port *port, void *context, gm_status_t status)
   }
 }
 
-int establish(ArgStruct *p)
+void establish(ArgStruct *p)
 {
   gm_recv_event_t *e;
   int bytesRead, recv_sz;

@@ -1,3 +1,4 @@
+
 /*****************************************************************************/
 /* "NetPIPE" -- Network Protocol Independent Performance Evaluator.          */
 /* Copyright 1997, 1998 Iowa State University Research Foundation, Inc.      */
@@ -29,7 +30,7 @@
 
 extern char *optarg;
 
-int main(int argc, char **argv)
+main(int argc, char **argv)
 {
     FILE        *out;           /* Output data file                          */
     char        s[255],s2[255],delim[255],*pstr; /* Generic strings          */
@@ -65,6 +66,8 @@ int main(int argc, char **argv)
 
     Data        bwdata[NSAMP];  /* Bandwidth curve data                      */
 
+    int         onlyTwoComm=0;  /* If running on more than two nodes, only
+                                   two nodes will actually communicate       */
     int         integCheck=0;   /* Integrity check                           */
 
     /* Initialize vars that may change from default due to arguments */
@@ -77,13 +80,10 @@ int main(int argc, char **argv)
 
     Init(&args, &argc, &argv);   /* This will set args.tr and args.rcv */
 
-    args.bidir = 0; /* Turn bi-directional mode off initially */
     args.cache = 1; /* Default to use cache */
-    args.upper = end;
-    args.host  = NULL;
-    args.soffset=0; /* default to no offsets */
-    args.roffset=0; 
-    args.syncflag=0; /* use normal mpi_send */
+    args.host  = NULL; /* XXX - DEBUGGING GM */
+	 args.soffset=0; /* default to no offsets */
+	 args.roffset=0; 
 
 
     /* TCGMSG launches NPtcgmsg with a -master master_hostname
@@ -94,24 +94,27 @@ int main(int argc, char **argv)
 #if ! defined(TCGMSG)
 
     /* Parse the arguments. See Usage for description */
-    while ((c = getopt(argc, argv, "SO:rIiPszgfaB2h:p:o:l:u:b:m:n:t:c:d:D:")) != -1)
+    while ((c = getopt(argc, argv, "O:rIiPszgfaBh:p:o:l:u:b:m:n:t:c:")) != -1)
     {
         switch(c)
         {
-            case 'O':
-                      strcpy(s2,optarg);
-                      strcpy(delim,",");
-                      if((pstr=strtok(s2,delim))!=NULL) {
-                         args.soffset=atoi(pstr);
-                         if((pstr=strtok((char *)NULL,delim))!=NULL)
-                            args.roffset=atoi(pstr);
-                         else /* only got one token */
-                            args.roffset=args.soffset;
-                      } else {
-                         args.soffset=0; args.roffset=0;
-                      }
-                      printf("Transmit buffer offset: %d\nReceive buffer offset: %d\n",args.soffset,args.roffset);
-                      break;
+					case 'O':
+							strcpy(s2,optarg);
+							strcpy(delim,",");
+							if((pstr=strtok(s2,delim))!=NULL)
+							{
+								args.soffset=atoi(pstr);
+								if((pstr=strtok((char *)NULL,delim))!=NULL)
+									args.roffset=atoi(pstr);
+								else /* only got one token */
+									args.roffset=args.soffset;
+							}
+							else
+							{
+								args.soffset=0; args.roffset=0;
+							}
+							printf("Transmit buffer offset: %d\nReceive buffer offset: %d\n",args.soffset,args.roffset);
+						break;
             case 'p': perturbation = atoi(optarg);
                       if( perturbation > 0 ) {
                          printf("Using a perturbation value of %d\n\n", perturbation);
@@ -142,18 +145,12 @@ int main(int argc, char **argv)
 
             case 's': streamopt = 1;
                       printf("Streaming in one direction only.\n\n");
-#ifdef TCP
                       printf("Sockets are reset between trials to avoid\n");
                       printf("degradation from a collapsing window size.\n\n");
-#endif
                       args.reset_conn = 1;
                       printf("Streaming does not provide an accurate\n");
                       printf("measurement of the latency since small\n");
                       printf("messages get bundled together.\n\n");
-                      if( args.bidir == 1 ) {
-                        printf("You can't use -s and -2 together\n");
-                        exit(0);
-                      }
                       fflush(stdout);
                       break;
 
@@ -168,47 +165,25 @@ int main(int argc, char **argv)
             case 'u': end = atoi(optarg);
                       break;
 
-#ifdef TCP
             case 'b': /* -b # resets the buffer size, -b 0 keeps system defs */
-                      args.prot.sndbufsz = args.prot.rcvbufsz = atoi(optarg);
-                      break;
-#endif
-
-            case '2': args.bidir = 1;    /* Both procs are transmitters */
-                         /* end will be maxed at sndbufsz+rcvbufsz */
-                      printf("Passing data in both directions simultaneously.\n");
-                      printf("Output is for the combined bandwidth.\n");
 #ifdef TCP
-                      printf("The socket buffer size limits the maximum test size.\n\n");
+                      args.prot.sndbufsz = args.prot.rcvbufsz = atoi(optarg);
 #endif
-                      if( streamopt ) {
-                        printf("You can't use -s and -2 together\n");
-                        exit(0);
-                      }
                       break;
 
-            case 'h': args.tr = 1;       /* -h implies transmit node */
+            case 'h': args.tr = 1;      /* -h implies transmit node */
                       args.rcv = 0;
                       args.host = (char *)malloc(strlen(optarg)+1);
                       strcpy(args.host, optarg);
                       break;
 
-#ifdef DISK
-            case 'd': args.tr = 1;      /* -d to specify input/output file */
-                      args.rcv = 0;
-                      args.prot.read = 0;
-                      args.prot.read_type = 'c';
-                      args.prot.dfile_name = (char *)malloc(strlen(optarg)+1);
-                      strcpy(args.prot.dfile_name, optarg);
+            case 'z': args.source_node = -1;
+                      printf("Receive using the ANY_SOURCE flag\n"); fflush(stdout);
                       break;
 
-            case 'D': if( optarg[0] == 'r' )
-                         args.prot.read = 1;
-                      else
-                         args.prot.read = 0;
-                      args.prot.read_type = optarg[1];
+            case 'a': asyncReceive = 1;
+                      printf("Preposting asynchronous receives\n"); fflush(stdout);
                       break;
-#endif
 
             case 'i': if(prepost_burst == 1) {
                         fprintf(stderr, "Integrity check not supported with prepost burst\n");
@@ -220,19 +195,6 @@ int main(int argc, char **argv)
                       printf("Doing an integrity check instead of measuring performance\n"); fflush(stdout);
                       break;
 
-#if defined(MPI)
-            case 'z': args.source_node = -1;
-                      printf("Receive using the ANY_SOURCE flag\n"); fflush(stdout);
-                      break;
-
-            case 'a': asyncReceive = 1;
-                      printf("Preposting asynchronous receives\n"); fflush(stdout);
-                      break;
-
-            case 'S': args.syncflag=1;
-                      fprintf(stderr,"Using synchronous sends\n");
-                      break;
-#endif
 #if defined(MPI2)
             case 'g': if(args.prot.no_fence == 1) {
                         fprintf(stderr, "-f cannot be used with -g\n");
@@ -251,6 +213,9 @@ int main(int argc, char **argv)
                       printf("Buffer alignment off (Required for no fence)\n");
                       break;
 #endif /* MPI2 */
+            case 'T': onlyTwoComm = 1;
+                      printf("Only two nodes will communicate\n"); fflush(stdout);
+                      break;
 
 #if defined(INFINIBAND)
             case 'm': switch(atoi(optarg)) {
@@ -346,15 +311,6 @@ int main(int argc, char **argv)
 
    Setup(&args);
 
-   if( args.bidir && end > args.upper ) {
-      end = args.upper;
-      if( args.tr ) {
-         printf("The upper limit is being set to %d Bytes\n", end);
-#if defined(TCP)
-         printf("due to socket buffer size limitations\n\n");
-#endif
-   }  }
-
 #if defined(GM)
 
    if(streamopt && (!nrepeat_const || nrepeat_const > args.prot.num_stokens)) {
@@ -369,7 +325,7 @@ int main(int argc, char **argv)
 
 #endif
 
-   if( args.tr )                     /* Primary transmitter */
+   if (args.tr)
    {
        if ((out = fopen(s, "w")) == NULL)
        {
@@ -377,57 +333,10 @@ int main(int argc, char **argv)
            exit(1);
        }
    }
-   else out = stdout;
+   else if( args.rcv )
+       out = stdout;
 
-      /* Set a starting value for the message size increment. */
-
-   inc = (start > 1) ? start / 2 : 1;
-   nq = (start > 1) ? 1 : 0;
-
-      /* Test the timing to set tlast for the first test */
-
-   args.bufflen = start;
-   MyMalloc(&args, args.bufflen, 0, 0);
-   InitBufferData(&args, args.bufflen, 0, 0);
-   if(args.cache) {
-      args.r_ptr = args.s_ptr = args.r_buff;
-   } else {
-      args.r_ptr = args.r_buff;
-      args.s_ptr = args.s_buff;
-   }
-   AfterAlignmentInit(&args);  /* MPI-2 needs this to create a window */
-
-   /* Infiniband requires use of asynchronous communications, so we need
-    * the PrepareToReceive calls below
-    */
-   if( asyncReceive )
-      PrepareToReceive(&args);
-   
-   Sync(&args);    /* Sync to prevent race condition in armci module */
-
-   t0 = When();
-      for( n=0; n<100; n++) {
-         if( args.tr || args.bidir) {
-            SendData(&args);
-            RecvData(&args);
-            if( asyncReceive && n<99 )
-               PrepareToReceive(&args);
-         } else if( args.rcv) {
-            RecvData(&args);
-            if( asyncReceive && n<99 )
-               PrepareToReceive(&args);
-            SendData(&args);
-         }
-      }
-   tlast = (When() - t0)/200;
-
-   /* Free the buffers and any other module-specific resources. */
-   if(args.cache)
-      FreeBuff(args.r_buff, NULL);
-   else
-      FreeBuff(args.s_buff, args.r_buff);
-
-      /* Do setup for no-cache mode, using two distinct buffers. */
+   /* Do setup for no-cache mode.  We will be using two distinct buffers. */
 
    if (!args.cache)
    {
@@ -466,11 +375,18 @@ int main(int argc, char **argv)
        args.r_ptr = args.r_buff+args.roffset;
    }
 
+   if (args.tr ) fprintf(stderr,"Now starting the main loop\n");
+
+       /* Set a starting value for the message size increment. */
+
+   inc = (start > 1) ? start / 2 : 1;
+   nq = (start > 1) ? 1 : 0;
+
+   tlast = 0;
+
        /**************************
         * Main loop of benchmark *
         **************************/
-
-   if( args.tr ) fprintf(stderr,"Now starting the main loop\n");
 
    for ( n = 0, len = start, errFlag = 0; 
         n < NSAMP - 3 && tlast < STOPTM && len <= end && !errFlag; 
@@ -492,12 +408,12 @@ int main(int argc, char **argv)
 
                /* Calculate how many times to repeat the experiment. */
 
-           if( args.tr )
+           if (args.tr)
            {
                if (nrepeat_const) {
                    nrepeat = nrepeat_const;
-/*               } else if (len == start) {*/
-/*                   nrepeat = MAX( RUNTM/( 0.000020 + start/(8*1000) ), TRIALS);*/
+               } else if (len == start) { /* The first try */
+                   nrepeat = MAX( RUNTM/( 0.000020 + start/(8*1000) ), TRIALS);
                } else {
                    nrepeat = MAX((RUNTM / ((double)args.bufflen /
                                   (args.bufflen - inc + 1.0) * tlast)),TRIALS);
@@ -510,10 +426,8 @@ int main(int argc, char **argv)
            }
 
            args.bufflen = len + pert;
-
-           if( args.tr )
-               fprintf(stderr,"%3d: %7d bytes %6d times --> ",
-                       n,args.bufflen,nrepeat);
+           if (args.tr)
+               	fprintf(stderr,"%3d: %7d bytes %6d times --> ", n,args.bufflen,nrepeat);
 
            if (args.cache) /* Allow cache effects.  We use only one buffer */
            {
@@ -542,7 +456,7 @@ int main(int argc, char **argv)
                 * the difference in performance at this time.
                 */
 
-               InitBufferData(&args, args.bufflen, args.soffset, args.roffset);
+					InitBufferData(&args, args.bufflen, args.soffset, args.roffset);
 
 
                /* Post-alignment initialization */
@@ -553,7 +467,7 @@ int main(int argc, char **argv)
                 * compatibility with no-cache mode, as this makes the code
                 * simpler) 
                 */
-               /* offsets are zero by default so this saves an #ifdef */
+					/* offsets are zero by default so this saves an #ifdef */
                args.r_ptr = args.r_buff+args.roffset;
                args.s_ptr = args.r_buff+args.soffset;
 
@@ -561,7 +475,7 @@ int main(int argc, char **argv)
            else /* Eliminate cache effects.  We use two distinct buffers */
            {
 
-               /* this isn't truly set up for offsets yet */
+				/* this isn't truly set up for offsets yet */
                /* Size of an aligned memory block including trailing padding */
 
                len_buf_align = args.bufflen;
@@ -591,7 +505,7 @@ int main(int argc, char **argv)
              * section that are not in the receive section.
              */
 
-            if( args.tr || args.bidir )
+            if (args.tr)
             {
                 /*
                    This is the transmitter: send the block TRIALS times, and
@@ -660,12 +574,7 @@ int main(int argc, char **argv)
                           AdvanceSendPtr(&args, len_buf_align);
 
                     }
-
-                       /* t is the 1-directional trasmission time */
-
-                    t = (When() - t0)/ nrepeat;
-
-                    if( !streamopt && !args.bidir) t /= 2; /* Normal ping-pong */
+                    t = (When() - t0)/((1 + !streamopt) * nrepeat);
 
                     Reset(&args);
 
@@ -763,9 +672,7 @@ int main(int argc, char **argv)
                         }
 
                     }
-                    t = (When() - t0)/ nrepeat;
-
-                    if( !streamopt && !args.bidir) t /= 2; /* Normal ping-pong */
+                    t = (When() - t0)/((1 + !streamopt) * nrepeat);
 
                     Reset(&args);
                     
@@ -797,7 +704,7 @@ int main(int argc, char **argv)
             }
             
             tlast = bwdata[n].t;
-            bwdata[n].bits = args.bufflen * CHARSIZE * (1+args.bidir);
+            bwdata[n].bits = args.bufflen * CHARSIZE;
             bwdata[n].bps = bwdata[n].bits / (bwdata[n].t * 1024 * 1024);
             bwdata[n].repeat = nrepeat;
             
@@ -821,15 +728,14 @@ int main(int argc, char **argv)
             if (args.cache)
                 FreeBuff(args.r_buff_orig, NULL);
             
-            if ( args.tr ) {
-               if(integCheck) {
-                 fprintf(stderr, " Integrity check passed\n");
+            if ( args.tr )
+              if(integCheck) {
+                fprintf(stderr, " Integrity check passed\n");
 
-               } else {
-                 fprintf(stderr," %8.2lf Mbps in %10.2lf usec\n", 
-                         bwdata[n].bps, tlast*1.0e6);
-               }
-            }
+              } else {
+                fprintf(stderr," %8.2lf Mbps in %10.2lf usec\n", 
+                        bwdata[n].bps, tlast*1.0e6);
+              }
 
 
         } /* End of perturbation loop */
@@ -845,7 +751,6 @@ int main(int argc, char **argv)
     if (args.tr) fclose(out);
          
     CleanUp(&args);
-    return 0;
 }
 
 
@@ -994,10 +899,7 @@ void PrintUsage()
     printf("r: reset sockets for every trial\n");
 #endif
 
-    printf("s: stream data in one direction only.\n");
-#if defined(MPI)
-    printf("S: Use synchronous sends.\n");
-#endif
+    printf("s: stream option\n");
 
 #if defined(INFINIBAND)
     printf("t: specify type of communications <-t type>\n"
@@ -1009,16 +911,10 @@ void PrintUsage()
     printf("u: upper bound stop value e.g. <-u 1048576>\n");
  
 #if defined(MPI)
-    printf("z: receive messages using the MPI_ANY_SOURCE flag\n");
+    printf("z: receive messages using the 'anysource' flag (source = -1)\n");
 #endif
 
-    printf("2: Send data in both directions at the same time.\n");
-#if defined(MPI)
-    printf("   May need to use -a to choose asynchronous communications for MPI/n");
-#endif
-#if defined(TCP)
-    printf("   The maximum test size is limited by the TCP buffer size/n");
-#endif
+
     printf("\n");
 }
 
@@ -1098,7 +994,7 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
         fprintf(stderr,"couldn't allocate memory for receive buffer\n");
         exit(-1);
     }
-       /* if pcache==1, use cache, so this line happens only if flushing cache */
+		/* if pcache==1, use cache, so this line happens only if flushing cache */
     
     if(!p->cache) /* Allocate second buffer if limiting cache */
       if((p->s_buff=(char *)malloc(bufflen+soffset))==(char *)NULL)

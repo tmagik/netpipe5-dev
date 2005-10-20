@@ -10,9 +10,26 @@ It is currently being developed and maintained by Dave Turner with
 help from several graduate students (Xuehua Chen, Adam Oline, 
 Brian Smith, Bogdan Vasiliu).
 
+Release 3.7 adds a bi-directional (-2) mode to allow data to be sent
+in both directions simultaneously. This has been tested with the
+TCP, MPI, MPI-2, IB, and GM modules.  You can also now test
+synchronous MPI communications MPI_SSend/MPI_SRecv using (-S).
+A launch utility (nplaunch) allows you to launch NPtcp, NPgm, 
+NPib, and NPpvm from one side using ssh to start the remote executible.
+
 Version 3.6 adds the ability to test with and without cache effects,
 and the ability to offset both the source and destination buffers.
 A memcpy module has also been added.
+
+Release 3.5 removes the CPU utilization measurements.  Getrusage is
+probably not very accurate, so a dummy workload will eventually be
+used instead.
+The streaming mode has also been fixed.  When run at Gigabit speeds,
+the TCP window size would collapse limit performance of subsequent
+data points.  Now we reset the sockets between trials to prevent this.
+We have also added in a module to evaluate memory copy rates.
+-n now sets a constant number of repeats for each trial.
+-r resets the sockets between each trial (automatic for streaming).
 
 Release 3.3 includes an Infiniband module for the Mellanox VAPI.
 It also has an integrity check (-i), which is still being developed.
@@ -43,10 +60,14 @@ NetPIPE requires an ANSI C compiler.  You are on your own for
 installing the various libraries that NetPIPE can be used to
 test.
 
-Review the provided Makefile and change any necessary settings, such
-as the CFLAGS compiler flags, required extra libraries, and MPI or PVM
+Review the provided makefile and change any necessary settings, such
+as the CC compiler or CFLAGS flags, required extra libraries, and PVM
 library & include file pathnames if you have these communication
-libraries.
+libraries.  Alternatively, you can specify these changes on the 
+make command line.  The line below would compile the NPtcp module
+using the icc compiler instead of the default cc compiler.
+
+  make CC=icc tcp
 
 Compile NetPIPE with the desired communication interface by using:
 
@@ -63,6 +84,10 @@ Compile NetPIPE with the desired communication interface by using:
   make armci      (still under development)
   make lapi       (for the IBM SP)
   make ib         (for Mellanox Infiniband adapters, uses VAPI layer)
+  make memcpy     (uses memcpy to copy data between buffers in 1 process)
+  make MP_memcpy  (uses an optimized copy in MP_memcpy.c to copy data between 
+                   buffers.  This requires icc or gcc 3.x.)
+
 
 Running NetPIPE
 ---------------
@@ -111,12 +136,22 @@ NetPIPE is run, and are in order of their general usefulness.
 		If this option is used, it must be specified on both
 		the sending and receiving processes
 
+        -S: Use synchronous sends/receives for MPI.
+
+        -2: Bi-directional communications.  Transmit in both directions
+            simultaneously.
+
    TCP
    ---
 
       Compile NetPIPE using 'make tcp'
-      other_host> NPtcp [options]
-      local_host> NPtcp -h other_host [options]
+
+      remote_host> NPtcp [options]
+      local_host>  NPtcp -h remote_host [options]
+
+                       OR
+
+      local_host>  nplaunch NPtcp -h remote_host [options]
 
    MPICH
    -----
@@ -163,10 +198,12 @@ NetPIPE is run, and are in order of their general usefulness.
       use the 'pvm' utility to start the pvmd daemons
         type 'pvm' to start it  (this will also start pvmd on the local_host)
         pvm> help           --> lists all commands
-        pvm> add other_host --> will start a pvmd on a machine called 'host2'
+        pvm> add remote_host --> will start a pvmd on a machine called 'host2'
         pvm> quit           --> when you have all the pvmd machines started
-      other_host> NPpvm [options]
-      local_host> NPpvm -h other_host [options]
+      remote_host> NPpvm [options]
+      local_host>  NPpvm -h remote_host [options]
+                       OR
+      local_host>  nplaunch NPpvm -h remote_host [options]
       Changing PVMDATA in netpipe.h and PvmRouteDirect in pvm.c can
         effect the performance greatly.
 
@@ -207,8 +244,13 @@ NetPIPE is run, and are in order of their general usefulness.
 
       Install the GM package and configure the Myrinet cards
       Compile NetPIPE using 'make gm'
-      other_host> NPgm [options]
-      local_host> NPgm -h other_host [options]
+
+      remote_host> NPgm [options]
+      local_host>  NPgm -h remote_host [options]
+
+                       OR
+
+      local_host>  nplaunch NPgm -h remote_host [options]
 
    LAPI
    ----
@@ -269,9 +311,15 @@ NetPIPE is run, and are in order of their general usefulness.
       Compile NetPIPE using 'make ib' (The environment variable MTHOME needs
         to be set to the directory containing the include and lib directories
         for the Mellanox software).
-      other_host> NPib
-      local_host> NPib -h other_host
-      (other_host should be the ip address or dns name of the other host)
+
+      remote_host> NPib [-options]
+      local_host>  NPib -h remote_host [-options]
+
+                       OR
+
+      local_host>  nplaunch NPib -h remote_host [options]
+
+      (remote_host should be the ip address or dns name of the other host)
         
       Other options:  Use -m to select mtu size for Infiniband adapter.
         Valid values are 256, 512, 1024, 2048, 4096.  Default is 1024.
@@ -279,15 +327,27 @@ NetPIPE is run, and are in order of their general usefulness.
 Interpreting the Results
 ------------------------
 
-NetPIPE's output file contains five columns: time to transfer the block,
-bits per second, bits in block, bytes in block, and variance.  These
-columns may be graphed to represent and compare the network's
-performance.  For example, the "network signature" graph can be
-created by graphing the time column versus the bits per second column
-(see the NetPIPE report at the URL above for the details why this
-graph is important and how to interpret it).  The more traditional
-"throughput versus block size" graph can be created by
-graphing the bytes column versus the bits per second column.
+NetPIPE generates a np.out file by default, which can be renamed using the
+-o option.  This file contains 3 columns:  the number of bytes, the 
+throughput in Mbps, and the round trip time divided by two.
+The first 2 columns can therefore be used to produce a throughput vs
+message size graph.
+
+The screen output contains this same information, plus the test number
+and the number of ping-pong's involved in the test.
+
+>more np.out
+       1 0.136403   0.00005593
+       2 0.274586   0.00005557
+       3 0.402104   0.00005692
+       4 0.545668   0.00005593
+       6 0.805053   0.00005686
+       8 1.039586   0.00005871
+      12 1.598912   0.00005726
+      13 1.700719   0.00005832
+      16 2.098007   0.00005818
+      19 2.340364   0.00006194
+
 
 Invalidating Cache
 ------------------
@@ -334,36 +394,9 @@ such as reading from memory in cache and writing to memory not in cache, would
 give intermediary results.  We chose to implement the methods that will measure
 the two extremes.
 
-Changes
--------
+Changes needed
+--------------
 
- - we need to put the getrusage stuff from version 2.4 back in
+ - we need to replace the getrusage stuff from version 2.4 with a dummy
+   workload
 
-version 3.2 (9/21/02)
-   * Added PVM, TCGMSG, MPI-2, SHMEM, GM, GPSHMEM, ARMCI, and LAPI
-     modules.
-   * Removed initial latency test since it is redundant
-   * Changed ping-pong test so data does not start in cache by default.
-     The -c option does the ping-pong between two buffers, which affects
-     SMP message-passing results greatly.  For SMP systems, both ways
-     should be tested.
-  
-version 2.3 (9/24/98)
-   * Add PVM interface contributed by Clark E. Dorman <dorman@s3i.com>
-
-   * Revamp README file with instructions for NPmpi and NPpvm, and
-     clarify some instructions for NPtcp
-
-version 2.2 (8/21/98):
-   * Carefully check all return values from write(2) and read(2)
-     system calls in TCP.c.  Handle short reads properly.  Make the Sync()
-     function transmit and receive a useful string which can be
-     checked for validity.
-
-   * Correct the overloading of SendTime() and RecvTime() functions
-     by breaking out SendRepeat() and RecvRepeat() as separate
-     functions.
-
-   * Handle systems whose accept(2) system call does not carry socket
-     options over from the listening socket.  In particular, set the
-     TCP_NODELAY flag and socket buffers on an accepted socket.

@@ -42,7 +42,6 @@ void Setup(ArgStruct *p)
 
  host = p->host;                           /* copy ptr to hostname */ 
 
-
  lsin1 = &(p->prot.sin1);
  lsin2 = &(p->prot.sin2);
 
@@ -61,7 +60,7 @@ void Setup(ArgStruct *p)
 
     /* Attempt to set TCP_NODELAY */
 
- if(setsockopt(sockfd, proto->p_proto, TCP_NODELAY, &one, sizeof(one)) < 0)
+ if(setsockopt(sockfd, proto->p_proto, TCP_NODELAY, (const void *) &one, sizeof(one)) < 0)
  {
    printf("NetPIPE: setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
    exit(556);
@@ -71,16 +70,18 @@ void Setup(ArgStruct *p)
 
  if(p->prot.sndbufsz > 0)
  {
-     if(setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
+     if(setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (const void *) &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
      {
           printf("NetPIPE: setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
+          printf("You may have asked for a buffer larger than the system can handle\n");
           exit(556);
      }
-     if(setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
+     if(setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (const void *) &(p->prot.rcvbufsz), 
                                        sizeof(p->prot.rcvbufsz)) < 0)
      {
           printf("NetPIPE: setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
+          printf("You may have asked for a buffer larger than the system can handle\n");
           exit(556);
      }
  }
@@ -95,8 +96,7 @@ void Setup(ArgStruct *p)
    fprintf(stderr, "(A bug in Linux doubles the requested buffer sizes)\n");
  }
 
- if (p->tr) {                                 /* if client i.e., Sender */
-
+ if( p->tr ) {                             /* Primary transmitter */
 
    if (atoi(host) > 0) {                   /* Numerical IP address */
      lsin1->sin_family = AF_INET;
@@ -115,7 +115,9 @@ void Setup(ArgStruct *p)
 
    lsin1->sin_port = htons(p->port);
 
- } else if( p->rcv ) {                      /* we are the receiver (server) */
+   p->commfd = sockfd;
+
+ } else if( p->rcv ) {                     /* we are the receiver */
    
    bzero((char *) lsin1, sizeof(*lsin1));
    lsin1->sin_family      = AF_INET;
@@ -127,15 +129,11 @@ void Setup(ArgStruct *p)
      exit(-6);
    }
 
- }
-
- if( p->tr )
-   p->commfd = sockfd;
- else if( p->rcv )
    p->servicefd = sockfd;
+ }
+ p->upper = send_size + recv_size;
 
- /* Establish connections */
- establish(p);
+ establish(p);                               /* Establish connections */
 
 }   
 
@@ -158,8 +156,7 @@ readFully(int fd, void *obuf, int len)
 
 void Sync(ArgStruct *p)
 {
-    char s[] = "SyncMe";
-    char response[] = "      ";
+    char s[] = "SyncMe", response[] = "      ";
 
     if (write(p->commfd, s, strlen(s)) < 0 ||           /* Write to nbor */
         readFully(p->commfd, response, strlen(s)) < 0)  /* Read from nbor */
@@ -169,7 +166,7 @@ void Sync(ArgStruct *p)
       }
     if (strncmp(s, response, strlen(s)))
       {
-        fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
+        fprintf(stderr, "NetPIPE: Synchronization string incorrect! |%s|\n", response);
         exit(3);
       }
 }
@@ -229,19 +226,22 @@ void RecvData(ArgStruct *p)
       }
 }
 
+/* uint32_t is used to insure that the integer size is the same even in tests 
+ * between 64-bit and 32-bit architectures. */
+
 void SendTime(ArgStruct *p, double *t)
 {
-    unsigned long ltime, ntime;
+    uint32_t ltime, ntime;
 
     /*
       Multiply the number of seconds by 1e8 to get time in 0.01 microseconds
       and convert value to an unsigned 32-bit integer.
       */
-    ltime = (unsigned long)(*t * 1.e8);
+    ltime = (uint32_t)(*t * 1.e8);
 
     /* Send time in network order */
     ntime = htonl(ltime);
-    if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
+    if (write(p->commfd, (char *)&ntime, sizeof(uint32_t)) < 0)
       {
         printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
         exit(301);
@@ -250,16 +250,16 @@ void SendTime(ArgStruct *p, double *t)
 
 void RecvTime(ArgStruct *p, double *t)
 {
-    unsigned long ltime, ntime;
+    uint32_t ltime, ntime;
     int bytesRead;
 
-    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
+    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(uint32_t));
     if (bytesRead < 0)
       {
         printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
         exit(302);
       }
-    else if (bytesRead != sizeof(unsigned long))
+    else if (bytesRead != sizeof(uint32_t))
       {
         fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
                 bytesRead);
@@ -274,12 +274,12 @@ void RecvTime(ArgStruct *p, double *t)
 
 void SendRepeat(ArgStruct *p, int rpt)
 {
-  unsigned long lrpt, nrpt;
+  uint32_t lrpt, nrpt;
 
   lrpt = rpt;
   /* Send repeat count as a long in network order */
   nrpt = htonl(lrpt);
-  if (write(p->commfd, (void *) &nrpt, sizeof(unsigned long)) < 0)
+  if (write(p->commfd, (void *) &nrpt, sizeof(uint32_t)) < 0)
     {
       printf("NetPIPE: write failed in SendRepeat: errno=%d\n", errno);
       exit(304);
@@ -288,16 +288,16 @@ void SendRepeat(ArgStruct *p, int rpt)
 
 void RecvRepeat(ArgStruct *p, int *rpt)
 {
-  unsigned long lrpt, nrpt;
+  uint32_t lrpt, nrpt;
   int bytesRead;
 
-  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(unsigned long));
+  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(uint32_t));
   if (bytesRead < 0)
     {
       printf("NetPIPE: read failed in RecvRepeat: errno=%d\n", errno);
       exit(305);
     }
-  else if (bytesRead != sizeof(unsigned long))
+  else if (bytesRead != sizeof(uint32_t))
     {
       fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
               bytesRead);
@@ -308,13 +308,15 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   *rpt = lrpt;
 }
 
-int establish(ArgStruct *p)
+void establish(ArgStruct *p)
 {
-  int clen, one = 1;
+  int one = 1;
+  socklen_t clen;
   struct protoent *proto;
 
-  clen = sizeof(p->prot.sin2);
-  if(p->tr){
+  clen = (socklen_t) sizeof(p->prot.sin2);
+
+  if( p->tr ){
 
     while( connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
                    sizeof(p->prot.sin1)) < 0 ) {
@@ -330,11 +332,12 @@ int establish(ArgStruct *p)
       } 
         
     }
+
   } else if( p->rcv ) {
+
     /* SERVER */
     listen(p->servicefd, 5);
-    p->commfd = accept(p->servicefd, (struct sockaddr *) &(p->prot.sin2),
-                       &clen);
+    p->commfd = accept(p->servicefd, (struct sockaddr *) &(p->prot.sin2), &clen);
 
     if(p->commfd < 0){
       printf("Server: Accept Failed! errno=%d\n",errno);
@@ -351,7 +354,7 @@ int establish(ArgStruct *p)
     }
 
     if(setsockopt(p->commfd, proto->p_proto, TCP_NODELAY,
-                  &one, sizeof(one)) < 0)
+                  (const void *) &one, sizeof(one)) < 0)
     {
       printf("setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
       exit(556);
@@ -362,20 +365,20 @@ int establish(ArgStruct *p)
     {
 /*      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",*/
 /*           p->prot.sndbufsz);*/
-      if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
-                                       sizeof(p->prot.sndbufsz)) < 0)
+      if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, 
+            (const void *) &(p->prot.sndbufsz), sizeof(p->prot.sndbufsz)) < 0)
       {
         printf("setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
         exit(556);
       }
-      if(setsockopt(p->commfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
-                                       sizeof(p->prot.rcvbufsz)) < 0)
+      if(setsockopt(p->commfd, SOL_SOCKET, SO_RCVBUF, 
+            (const void *) &(p->prot.rcvbufsz), sizeof(p->prot.rcvbufsz)) < 0)
       {
         printf("setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
         exit(556);
       }
     }
-  } 
+  }
 }
 
 void CleanUp(ArgStruct *p)

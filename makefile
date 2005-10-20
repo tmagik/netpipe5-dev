@@ -24,11 +24,15 @@ CC         = cc
 CFLAGS     = -O
 SRC        = ./src
 
+SUNLIBS    = -lsocket -lnsl
+
+
 # For MPI, mpicc will set up the proper include and library paths
 
 MPICC       = mpicc
 
-MP_Lite_home   = $(HOME)/MP_Lite
+MP_Lite_home   = $(HOME)/mplite
+#MP_Lite_home   = $(HOME)/MP_Lite
 
 PVM_HOME   = /usr/share/pvm3
 PVM_ARCH   = LINUX
@@ -73,21 +77,32 @@ MPI2_INC =
 all:tcp 
 
 clean:
-	rm -f *.o NPtcp NPmpi NPmpi2 NPparagon NPmplite NPtcgmsg NPpvm NParmci NPshmem NPgpshmem NPgm np.out NPmemcpy NPib NPmplite-ib
-# this should test for existance of MP_Lite_home otherwise it is busted
-#	( cd $(MP_Lite_home); make clean )
-
+	rm -f *.o NP* np.out
 
 #
 # This section of the Makefile is for compiling the binaries
 #
 
 
-tcp: $(SRC)/tcp.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
-	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  -o NPtcp -I$(SRC)
+#tcp: $(SRC)/tcp.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
+#	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  -o NPtcp -I$(SRC)
 
-memcpy: $(SRC)/memcpy.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
-	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/memcpy.c -DMEMCPY -o NPmemcpy -I$(SRC)
+tcp: $(SRC)/tcp.c $(SRC)/netpipe.c $(SRC)/netpipe.h
+	@if [ `uname` = "SunOS" ] ; then \
+	   $(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  \
+	         -o NPtcp -I$(SRC) $(SUNLIBS); \
+	else \
+	   $(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  \
+	         -o NPtcp -I$(SRC); \
+	fi;
+
+memcpy: $(SRC)/memcpy.c $(SRC)/netpipe.c $(SRC)/netpipe.h
+	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/memcpy.c \
+              -DMEMCPY -o NPmemcpy -I$(SRC)
+
+MP_memcpy: $(SRC)/memcpy.c $(SRC)/netpipe.c $(SRC)/netpipe.h $(SRC)/MP_memcpy.c
+	$(CC) $(CFLAGS) -mmmx -msse $(SRC)/netpipe.c $(SRC)/memcpy.c \
+              $(SRC)/MP_memcpy.c -DMEMCPY -DUSE_MP_MEMCPY -o NPmemcpy -I$(SRC)
 
 disk: $(SRC)/disk.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
 	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/disk.c -DDISK -o NPdisk -I$(SRC)
@@ -139,7 +154,8 @@ mpich-gm: $(SRC)/mpi.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 
 gm: $(SRC)/gm.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
 	$(CC) $(CFLAGS) -DGM $(SRC)/netpipe.c $(SRC)/gm.c \
-            -o NPgm -I$(SRC) -I$(GM_INC) -I$(GM_DRI) $(GM_LIB)
+            -o NPgm -I$(SRC) -I$(GM_INC) -I$(GM_DRI) \
+            $(GM_LIB) -static
 
 mvich: $(SRC)/mpi.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
 	mvichcc $(CFLAGS) -DMPI $(SRC)/netpipe.c \
@@ -225,3 +241,9 @@ ib: $(SRC)/ib.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 	$(CC) $(CFLAGS) $(SRC)/ib.c $(SRC)/netpipe.c -o NPib \
         -DINFINIBAND -DTCP -I $(VAPI_INC) -L $(VAPI_LIB) -lcm \
         -lmosal -lmpga -lmtl_common -lvapi 
+
+atoll: $(SRC)/atoll.c $(SRC)/netpipe.c $(SRC)/netpipe.h
+	$(CC) $(CFLAGS) -DATOLL $(SRC)/netpipe.c \
+        $(SRC)/atoll.c -o NPatoll \
+        -I$(PALMS_PATH)/include -L$(PALMS_PATH)/lib -latoll
+
