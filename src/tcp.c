@@ -60,7 +60,7 @@ void Setup(ArgStruct *p)
 
     /* Attempt to set TCP_NODELAY */
 
- if(setsockopt(sockfd, proto->p_proto, TCP_NODELAY, (const void *) &one, sizeof(one)) < 0)
+ if(setsockopt(sockfd, proto->p_proto, TCP_NODELAY, &one, sizeof(one)) < 0)
  {
    printf("NetPIPE: setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
    exit(556);
@@ -70,14 +70,14 @@ void Setup(ArgStruct *p)
 
  if(p->prot.sndbufsz > 0)
  {
-     if(setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (const void *) &(p->prot.sndbufsz), 
+     if(setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
      {
           printf("NetPIPE: setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
           printf("You may have asked for a buffer larger than the system can handle\n");
           exit(556);
      }
-     if(setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (const void *) &(p->prot.rcvbufsz), 
+     if(setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
                                        sizeof(p->prot.rcvbufsz)) < 0)
      {
           printf("NetPIPE: setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
@@ -354,7 +354,7 @@ void establish(ArgStruct *p)
     }
 
     if(setsockopt(p->commfd, proto->p_proto, TCP_NODELAY,
-                  (const void *) &one, sizeof(one)) < 0)
+                  &one, sizeof(one)) < 0)
     {
       printf("setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
       exit(556);
@@ -365,14 +365,14 @@ void establish(ArgStruct *p)
     {
 /*      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",*/
 /*           p->prot.sndbufsz);*/
-      if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, 
-            (const void *) &(p->prot.sndbufsz), sizeof(p->prot.sndbufsz)) < 0)
+      if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
+                                       sizeof(p->prot.sndbufsz)) < 0)
       {
         printf("setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
         exit(556);
       }
-      if(setsockopt(p->commfd, SOL_SOCKET, SO_RCVBUF, 
-            (const void *) &(p->prot.rcvbufsz), sizeof(p->prot.rcvbufsz)) < 0)
+      if(setsockopt(p->commfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
+                                       sizeof(p->prot.rcvbufsz)) < 0)
       {
         printf("setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
         exit(556);

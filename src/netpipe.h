@@ -145,7 +145,7 @@ enum communication_types {
   struct protocolstruct
   {
           int nbor,ipe;
-          int *flag;
+          volatile int *flag;
   };
 
 #elif defined(ARMCI)
@@ -156,7 +156,7 @@ enum communication_types {
   struct protocolstruct
   {
           int nbor,ipe;
-          int *flag;
+          volatile int *flag;
   };
 
 
@@ -214,6 +214,9 @@ struct argstruct
     short    port;          /* Port used for connection                      */
     char     *r_buff;       /* Aligned receive buffer                        */
     char     *r_buff_orig;  /* Original unaligned receive buffer             */
+#if defined(USE_VOLATILE_RPTR)
+    volatile                /* use volatile if polling on buffer in module   */
+#endif
     char     *r_ptr;        /* Pointer to current location in send buffer    */
     char     *r_ptr_saved;  /* Pointer for saving value of r_ptr             */
     char     *s_buff;       /* Aligned send buffer                           */
@@ -227,10 +230,10 @@ struct argstruct
              nbuff;         /* Number of buffers to transmit                 */
 
     int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
-  
+    int      preburst;      /* Burst preposted receives before timed runs    */
     int      reset_conn;    /* Reset connection flag                         */
-		int			soffset,roffset;
-	int syncflag; /* flag for using sync sends vs. normal sends in MPI mod*/
+    int      soffset,roffset;
+    int      syncflag; /* flag for using sync sends vs. normal sends in MPI mod*/
 
     /* Now we work with a union of information for protocol dependent stuff  */
     ProtocolStruct prot;

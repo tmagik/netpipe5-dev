@@ -1,4 +1,5 @@
 /* Netpipe module for mpi-2 one-sided communications by Adam Oline */
+#define USE_VOLATILE_RPTR
 #include "netpipe.h"
 #include <mpi.h>
 
@@ -106,7 +107,9 @@ void RecvData(ArgStruct *p)
      * to timing issues.
      */
     while(p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1) )
-      sched_yield();
+      sched_yield(); /* Since we made r_ptr volatile, we don't necessarily
+                      * need to call a function here encourage the compiler
+                      * to reload it */
     
     p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
 

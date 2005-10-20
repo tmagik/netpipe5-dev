@@ -54,7 +54,6 @@ int main(int argc, char **argv)
                 start= 1,       /* Starting value for signature curve        */
                 end=MAXINT,     /* Ending value for signature curve          */
                 streamopt=0,    /* Streaming mode flag                       */
-                prepost_burst=0,/* Prepost burst flag                        */
                 reset_connection;/* Reset the connection between trials      */
    
     ArgStruct   args;           /* Arguments for all the calls               */
@@ -77,6 +76,7 @@ int main(int argc, char **argv)
 
     Init(&args, &argc, &argv);   /* This will set args.tr and args.rcv */
 
+    args.preburst = 0; /* Default to not bursting preposted receives */
     args.bidir = 0; /* Turn bi-directional mode off initially */
     args.cache = 1; /* Default to use cache */
     args.upper = end;
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
                         fprintf(stderr, "Integrity check not supported with prepost burst\n");
                         exit(-1);
                       }
-                      prepost_burst = 1;
+                      args.preburst = 1;
                       asyncReceive = 1;
                       printf("Preposting all receives before a timed run.\n");
                       printf("Some would consider this cheating,\n");
@@ -142,14 +142,14 @@ int main(int argc, char **argv)
 
             case 's': streamopt = 1;
                       printf("Streaming in one direction only.\n\n");
-#ifdef TCP
+#if defined(TCP) && ! defined(INFINIBAND) 
                       printf("Sockets are reset between trials to avoid\n");
                       printf("degradation from a collapsing window size.\n\n");
 #endif
                       args.reset_conn = 1;
                       printf("Streaming does not provide an accurate\n");
                       printf("measurement of the latency since small\n");
-                      printf("messages get bundled together.\n\n");
+                      printf("messages may get bundled together.\n\n");
                       if( args.bidir == 1 ) {
                         printf("You can't use -s and -2 together\n");
                         exit(0);
@@ -168,7 +168,7 @@ int main(int argc, char **argv)
             case 'u': end = atoi(optarg);
                       break;
 
-#ifdef TCP
+#if defined(TCP) && ! defined(INFINIBAND)
             case 'b': /* -b # resets the buffer size, -b 0 keeps system defs */
                       args.prot.sndbufsz = args.prot.rcvbufsz = atoi(optarg);
                       break;
@@ -178,7 +178,7 @@ int main(int argc, char **argv)
                          /* end will be maxed at sndbufsz+rcvbufsz */
                       printf("Passing data in both directions simultaneously.\n");
                       printf("Output is for the combined bandwidth.\n");
-#ifdef TCP
+#if defined(TCP) && ! defined(INFINIBAND)
                       printf("The socket buffer size limits the maximum test size.\n\n");
 #endif
                       if( streamopt ) {
@@ -210,7 +210,7 @@ int main(int argc, char **argv)
                       break;
 #endif
 
-            case 'i': if(prepost_burst == 1) {
+            case 'i': if(args.preburst == 1) {
                         fprintf(stderr, "Integrity check not supported with prepost burst\n");
                         exit(-1);
                       }
@@ -317,7 +317,7 @@ int main(int argc, char **argv)
             case 'n': nrepeat_const = atoi(optarg);
                       break;
 
-#if defined(TCP)
+#if defined(TCP) && ! defined(INFINIBAND)
             case 'r': args.reset_conn = 1;
                       printf("Resetting connection after every trial\n");
                       break;
@@ -334,6 +334,33 @@ int main(int argc, char **argv)
 #if defined(INFINIBAND)
    asyncReceive = 1;
    fprintf(stderr, "Preposting asynchronous receives (required for Infiniband)\n");
+   if(args.bidir && (
+          (args.cache && args.prot.commtype == NP_COMM_RDMAWRITE) || /* rdma_write only works with no-cache mode */
+          (!args.preburst && args.prot.commtype != NP_COMM_RDMAWRITE) || /* anything besides rdma_write requires prepost burst */
+          (args.preburst && args.prot.comptype == NP_COMP_LOCALPOLL && args.cache) || /* preburst with local polling in cache mode doesn't work */
+          0)) {
+
+      fprintf(stderr, 
+         "\n"
+         "Bi-directional mode currently only works with a subset of the\n"
+         "Infiniband options. Restrictions are:\n"
+         "\n"
+         "  RDMA write (-t rdma_write) requires no-cache mode (-I).\n"
+         "\n"
+         "  Local polling (-c local_poll, default if no -c given) requires\n"
+         "    no-cache mode (-I), and if not using RDMA write communication,\n"
+         "    burst mode (-B).\n"
+         "\n"
+         "  Any other communication type and any other completion type\n"
+         "    require burst mode (-B). No-cache mode (-I) may be used\n"
+         "    optionally.\n"
+         "\n"
+         "  All other option combinations will fail.\n"
+         "\n");
+               
+      exit(-1);      
+
+   }
 #endif
 
    if (start > end)
@@ -350,7 +377,7 @@ int main(int argc, char **argv)
       end = args.upper;
       if( args.tr ) {
          printf("The upper limit is being set to %d Bytes\n", end);
-#if defined(TCP)
+#if defined(TCP) && ! defined(INFINIBAND)
          printf("due to socket buffer size limitations\n\n");
 #endif
    }  }
@@ -389,12 +416,12 @@ int main(int argc, char **argv)
    args.bufflen = start;
    MyMalloc(&args, args.bufflen, 0, 0);
    InitBufferData(&args, args.bufflen, 0, 0);
-   if(args.cache) {
-      args.r_ptr = args.s_ptr = args.r_buff;
-   } else {
-      args.r_ptr = args.r_buff;
-      args.s_ptr = args.s_buff;
-   }
+
+   if(args.cache) args.s_buff = args.r_buff;
+   
+   args.r_ptr = args.r_buff_orig = args.r_buff;
+   args.s_ptr = args.s_buff_orig = args.s_buff;
+      
    AfterAlignmentInit(&args);  /* MPI-2 needs this to create a window */
 
    /* Infiniband requires use of asynchronous communications, so we need
@@ -405,9 +432,15 @@ int main(int argc, char **argv)
    
    Sync(&args);    /* Sync to prevent race condition in armci module */
 
+   /* For simplicity's sake, even if the real test below will be done in
+    * bi-directional mode, we still do the ping-pong one-way-at-a-time test
+    * here to estimate the one-way latency. Unless it takes significantly
+    * longer to send data in both directions at once than it does to send data
+    * one way at a time, this shouldn't be too far off anyway.
+    */
    t0 = When();
       for( n=0; n<100; n++) {
-         if( args.tr || args.bidir) {
+         if( args.tr) {
             SendData(&args);
             RecvData(&args);
             if( asyncReceive && n<99 )
@@ -421,11 +454,17 @@ int main(int argc, char **argv)
       }
    tlast = (When() - t0)/200;
 
+   /* Sync up and Reset before freeing the buffers */
+
+   Sync(&args); 
+
+   Reset(&args);
+   
    /* Free the buffers and any other module-specific resources. */
    if(args.cache)
-      FreeBuff(args.r_buff, NULL);
+      FreeBuff(args.r_buff_orig, NULL);
    else
-      FreeBuff(args.s_buff, args.r_buff);
+      FreeBuff(args.r_buff_orig, args.s_buff_orig);
 
       /* Do setup for no-cache mode, using two distinct buffers. */
 
@@ -601,7 +640,7 @@ int main(int argc, char **argv)
 
                 for (i = 0; i < (integCheck ? 1 : TRIALS); i++)
                 {                    
-                    if(prepost_burst && asyncReceive && !streamopt)
+                    if(args.preburst && asyncReceive && !streamopt)
                     {
 
                       /* We need to save the value of the recv ptr so
@@ -633,7 +672,7 @@ int main(int argc, char **argv)
 
                     for (j = 0; j < nrepeat; j++)
                     {
-                        if (!prepost_burst && asyncReceive && !streamopt)
+                        if (!args.preburst && asyncReceive && !streamopt)
                         {
                             PrepareToReceive(&args);
                         }
@@ -700,7 +739,7 @@ int main(int argc, char **argv)
                 {
                     if (asyncReceive)
                     {
-                       if (prepost_burst)
+                       if (args.preburst)
                        {
 
                          /* We need to save the value of the recv ptr so
@@ -747,7 +786,7 @@ int main(int argc, char **argv)
                             AdvanceRecvPtr(&args, len_buf_align);
                         }
                         
-                        if (!prepost_burst && asyncReceive && (j < nrepeat-1))
+                        if (!args.preburst && asyncReceive && (j < nrepeat-1))
                         {
                             PrepareToReceive(&args);
                         }
@@ -951,10 +990,11 @@ void VerifyIntegrity(ArgStruct *p)
 void PrintUsage()
 {
     printf("\n NETPIPE USAGE \n\n");
+#if ! defined(INFINIBAND)
     printf("a: asynchronous receive (a.k.a. preposted receive)\n");
-
+#endif
     printf("B: burst all preposts before measuring performance\n");
-#if defined(TCP)
+#if defined(TCP) && ! defined(INFINIBAND)
     printf("b: specify TCP send/receive socket buffer sizes\n");
 #endif
 
@@ -970,7 +1010,7 @@ void PrintUsage()
     printf("   all MPI-2 implementations\n");
 #endif
 
-#if defined(TCP)
+#if defined(TCP) || defined(INFINIBAND)
     printf("h: specify hostname of the receiver <-h host>\n");
 #endif
 
@@ -990,7 +1030,7 @@ void PrintUsage()
     printf("p: set the perturbation number <-p 1>\n"
            "   (default = 3 Bytes, set to 0 for no perturbations)\n");
 
-#if defined(TCP)
+#if defined(TCP) && ! defined(INFINIBAND)
     printf("r: reset sockets for every trial\n");
 #endif
 
@@ -1016,7 +1056,7 @@ void PrintUsage()
 #if defined(MPI)
     printf("   May need to use -a to choose asynchronous communications for MPI/n");
 #endif
-#if defined(TCP)
+#if defined(TCP) && !defined(INFINIBAND)
     printf("   The maximum test size is limited by the TCP buffer size/n");
 #endif
     printf("\n");
@@ -1028,7 +1068,7 @@ void* AlignBuffer(void* buff, int boundary)
     return buff;
   else
     /* char* typecast required for cc on IRIX */
-    return ((char*)buff) + (boundary - ((long)buff % boundary) );
+    return ((char*)buff) + (boundary - ((unsigned long)buff % boundary) );
 }
 
 void AdvanceSendPtr(ArgStruct* p, int blocksize)
@@ -1059,7 +1099,9 @@ void AdvanceRecvPtr(ArgStruct* p, int blocksize)
 
 void SaveRecvPtr(ArgStruct* p)
 {
-  p->r_ptr_saved = p->r_ptr;
+  /* Typecast prevents warning about loss of volatile qualifier */
+
+  p->r_ptr_saved = (void*)p->r_ptr; 
 }
 
 void ResetRecvPtr(ArgStruct* p)
@@ -1121,5 +1163,3 @@ void FreeBuff(char *buff1, char *buff2)
 }
 
 #endif
-
-

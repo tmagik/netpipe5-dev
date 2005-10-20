@@ -6,6 +6,7 @@
 
 #include <mpi.h>
 #include "armci.h"
+#define USE_VOLATILE_RPTR /* need for polling on receive buffer */
 #include "netpipe.h"
 
 extern double *pTime;
@@ -273,8 +274,9 @@ void SendData(ArgStruct *p) {
 
 void RecvData(ArgStruct *p) {
 
-    while (p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1)) {
-       if ((int)p % 2 == 3) printf(""); 
+    while (p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1)) 
+    {
+       /* BUSY WAIT */
     }
 
     p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
@@ -292,16 +294,16 @@ void SendTime(ArgStruct *p, double *t) {
     ARMCI_Put(pTime, remote_buff, p_bytes, p->prot.nbor);
 
     p_bytes = sizeof(int);
-    remote_buff = remote_ptr(p->prot.flag);
-    ARMCI_Put(p->prot.flag, remote_buff, p_bytes, p->prot.nbor);
+    remote_buff = remote_ptr((void*)p->prot.flag);
+    ARMCI_Put((void*)p->prot.flag, remote_buff, p_bytes, p->prot.nbor);
 }
 
 
 void RecvTime(ArgStruct *p, double *t) {
-    int i = 0;
 
-    while (*p->prot.flag != p->prot.ipe) {
-       if ((++i % 10000000) == 0) printf("");
+    while (*p->prot.flag != p->prot.ipe) 
+    {
+       /* BUSY WAIT */   
     }
 
     *t = *pTime; 
@@ -320,18 +322,18 @@ void SendRepeat(ArgStruct *p, int rpt) {
     ARMCI_Put(pNrepeat, remote_buff, p_bytes, p->prot.nbor);
 
     p_bytes = sizeof(int);
-    remote_buff = remote_ptr(p->prot.flag);
-    ARMCI_Put(p->prot.flag, remote_buff, p_bytes, p->prot.nbor);
+    remote_buff = remote_ptr((void*)p->prot.flag);
+    ARMCI_Put((void*)p->prot.flag, remote_buff, p_bytes, p->prot.nbor);
 
 }
 
 
 void RecvRepeat(ArgStruct *p, int *rpt) {
     void *remote_buff;
-    int i = 0;
 
-    while (*p->prot.flag != p->prot.ipe) {
-        if ((++i % 2) == 3) printf("");
+    while (*p->prot.flag != p->prot.ipe)
+    {
+       /* BUSY WAIT */
     }
     
     *rpt = *pNrepeat;

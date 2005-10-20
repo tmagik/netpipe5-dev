@@ -24,15 +24,11 @@ CC         = cc
 CFLAGS     = -O
 SRC        = ./src
 
-SUNLIBS    = -lsocket -lnsl
-
-
 # For MPI, mpicc will set up the proper include and library paths
 
 MPICC       = mpicc
 
-MP_Lite_home   = $(HOME)/mplite
-#MP_Lite_home   = $(HOME)/MP_Lite
+MP_Lite_home   = $(HOME)/MP_Lite
 
 PVM_HOME   = /usr/share/pvm3
 PVM_ARCH   = LINUX
@@ -84,17 +80,8 @@ clean:
 #
 
 
-#tcp: $(SRC)/tcp.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
-#	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  -o NPtcp -I$(SRC)
-
-tcp: $(SRC)/tcp.c $(SRC)/netpipe.c $(SRC)/netpipe.h
-	@if [ `uname` = "SunOS" ] ; then \
-	   $(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  \
-	         -o NPtcp -I$(SRC) $(SUNLIBS); \
-	else \
-	   $(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  \
-	         -o NPtcp -I$(SRC); \
-	fi;
+tcp: $(SRC)/tcp.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
+	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/tcp.c -DTCP  -o NPtcp -I$(SRC)
 
 memcpy: $(SRC)/memcpy.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 	$(CC) $(CFLAGS) $(SRC)/netpipe.c $(SRC)/memcpy.c \
@@ -189,7 +176,7 @@ mplite-ib: $(SRC)/mpi.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 	$(CC) $(CFLAGS) -g -DMPI $(SRC)/netpipe.c $(SRC)/mpi.c \
             -o NPmplite-ib -I$(SRC) -I$(MP_Lite_home) \
             $(MP_Lite_home)/libmplite.a -L/usr/mellanox/lib \
-            -lmpga -lvapi -lmtl_common -lmosal
+            -lmpga -lvapi -lpthread
 
 pvm: $(SRC)/pvm.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
 	$(CC) $(CFLAGS) -DPVM $(SRC)/netpipe.c $(SRC)/pvm.c \
@@ -239,8 +226,8 @@ mpi2: $(SRC)/mpi2.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 
 ib: $(SRC)/ib.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
 	$(CC) $(CFLAGS) $(SRC)/ib.c $(SRC)/netpipe.c -o NPib \
-        -DINFINIBAND -DTCP -I $(VAPI_INC) -L $(VAPI_LIB) -lcm \
-        -lmosal -lmpga -lmtl_common -lvapi 
+        -DINFINIBAND -DTCP -I $(VAPI_INC) -L $(VAPI_LIB) \
+        -lmpga -lvapi -lpthread
 
 atoll: $(SRC)/atoll.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 	$(CC) $(CFLAGS) -DATOLL $(SRC)/netpipe.c \

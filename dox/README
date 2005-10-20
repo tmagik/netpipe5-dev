@@ -10,9 +10,16 @@ It is currently being developed and maintained by Dave Turner with
 help from several graduate students (Xuehua Chen, Adam Oline, 
 Brian Smith, Bogdan Vasiliu).
 
-Release 3.7 adds a bi-directional (-2) mode to allow data to be sent
+Release 3.6.2 mainly fixes some bugs. A number of portability issues 
+with 64-bit architectures were taken care of, especially in the Infiniband
+module. A small typecasting error was fixed that caused segmentation faults 
+on Red Hat Enterprise and Fedora Core systems (and probably others...). The 
+bi-directional mode was also tested with the Infiniband module, and a subset
+of NetPIPE options are now supported.
+
+Release 3.6.1 adds a bi-directional (-2) mode to allow data to be sent
 in both directions simultaneously. This has been tested with the
-TCP, MPI, MPI-2, IB, and GM modules.  You can also now test
+TCP, MPI, MPI-2, and GM modules.  You can also now test
 synchronous MPI communications MPI_SSend/MPI_SRecv using (-S).
 A launch utility (nplaunch) allows you to launch NPtcp, NPgm, 
 NPib, and NPpvm from one side using ssh to start the remote executible.
@@ -96,18 +103,18 @@ Running NetPIPE
 to the np.out.  The following parameters can be used to change how
 NetPIPE is run, and are in order of their general usefulness.
 
-	-b: specify send and receive TCP buffer sizes e.g. "-b 32768"
+        -b: specify send and receive TCP buffer sizes e.g. "-b 32768"
             This can make a huge difference for Gigabit Ethernet cards.
             You may need to tune the OS to set a larger maximum TCP
             buffer size for optimal performance.
 
-        -O: specify transmit and optionally receive buffer offsets <-O 1,3>
+        -O: specify send and optionally receive buffer offsets, e.g. "-O 1,3"
 
-	-l: lower bound (start value for block size) e.g. "-l 1"
+        -l: lower bound (start value for block size) e.g. "-l 1"
 
-	-u: upper bound (stop value for block size) e.g. "-u 1048576"
+        -u: upper bound (stop value for block size) e.g. "-u 1048576"
 
-	-o: specify output filename e.g. "-o output.txt"
+        -o: specify output filename e.g. "-o output.txt"
 
         -z: for MPI, receive messages using ANYSOURCE
 
@@ -118,23 +125,20 @@ NetPIPE is run, and are in order of their general usefulness.
         -I: Invalidate cache: Take measures to eliminate the effects cache
             has on performance.
 
-	-A: specify buffers alignment e.g. "-A 4096"
-            buffers are page-aligned by default
-
-	-a: asynchronous receive (a.k.a. pre-posted receive)
-		May not have any effect, depending on your implementation
+        -a: asynchronous receive (a.k.a. pre-posted receive)
+                May not have any effect, depending on your implementation
         
         -B: burst all preposts before measuring performance
                 Normally only one receive is preposted at a time with -a
 
-        -P: turn off perturbations of buffer size
+        -p: set perturbation offset of buffer size, e.g. "-p 3"
 
-	-i: Integrity check: Check the integrity of data transfer instead
+        -i: Integrity check: Check the integrity of data transfer instead
             of performance
 
-	-s: stream option (default mode is "ping pong")
-		If this option is used, it must be specified on both
-		the sending and receiving processes
+        -s: stream option (default mode is "ping pong")
+                If this option is used, it must be specified on both
+                the sending and receiving processes
 
         -S: Use synchronous sends/receives for MPI.
 
@@ -297,7 +301,7 @@ NetPIPE is run, and are in order of their general usefulness.
       Follow the directions for running the MPI package from above
       If running on interfaces other than the default, create a file
         called armci_hosts, containing two lines, one for each hostname,
-	then run package. 
+        then run package. 
 
    Infiniband
    ----------
@@ -319,10 +323,24 @@ NetPIPE is run, and are in order of their general usefulness.
 
       local_host>  nplaunch NPib -h remote_host [options]
 
-      (remote_host should be the ip address or dns name of the other host)
+      (remote_host should be the ip address or hostname of the other host)
         
-      Other options:  Use -m to select mtu size for Infiniband adapter.
-        Valid values are 256, 512, 1024, 2048, 4096.  Default is 1024.
+      Other options:
+        Use -m to select mtu size for Infiniband adapter.
+          Valid values are 256, 512, 1024, 2048, 4096.  Default is 1024.
+        Use -t to select the communications type.
+          Possible values are 
+            send_recv: basic send and receive
+            send_recv_with_imm: send and receive with immediate data
+            rdma_write: one-sided remote dma write
+            rdma_write_with_imm: one-sided remote dma write with immediate data
+          Default is send_recv.
+        Use -c to select the message completion type.
+          Possible values are 
+            local_poll: poll on last byte of receive buffer
+            vapi_poll: use VAPI polling mechanism
+            event: use VAPI event completion mechanism
+          Default is local_poll.
 
 Interpreting the Results
 ------------------------
