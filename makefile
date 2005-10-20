@@ -229,6 +229,10 @@ ib: $(SRC)/ib.c $(SRC)/netpipe.c $(SRC)/netpipe.h
         -DINFINIBAND -DTCP -I $(VAPI_INC) -L $(VAPI_LIB) \
         -lmpga -lvapi -lpthread
 
+ibv: $(SRC)/ibv.c $(SRC)/netpipe.c $(SRC)/netpipe.h 
+	$(CC) $(CFLAGS) $(SRC)/ibv.c $(SRC)/netpipe.c -o NPibv \
+        -DOPENIB -DTCP -libverbs
+
 atoll: $(SRC)/atoll.c $(SRC)/netpipe.c $(SRC)/netpipe.h
 	$(CC) $(CFLAGS) -DATOLL $(SRC)/netpipe.c \
         $(SRC)/atoll.c -o NPatoll \

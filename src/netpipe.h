@@ -27,6 +27,10 @@
 #include <ib_defs.h> /* ib_mtu_t */
 #endif
 
+#ifdef OPENIB
+#include <infiniband/verbs.h>	/* enum ibv_mtu */
+#endif
+
 #ifdef FINAL
   #define  TRIALS             7
   #define  RUNTM              0.25
@@ -73,9 +77,14 @@
       int                     commtype; /* Communications type            */
       int                     comptype; /* Completion type                */
 #endif
+#if defined(OPENIB)
+      enum ibv_mtu            ib_mtu;   /* MTU Size for Infiniband HCA    */
+      int                     commtype; /* Communications type            */
+      int                     comptype; /* Completion type                */
+#endif
   };
 
-#if defined(INFINIBAND)
+#if defined(INFINIBAND) || defined(OPENIB)
 enum completion_types {
    NP_COMP_LOCALPOLL,  /* Poll locally on last byte of data     */
    NP_COMP_VAPIPOLL,   /* Poll using vapi function              */

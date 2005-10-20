@@ -142,7 +142,7 @@ int main(int argc, char **argv)
 
             case 's': streamopt = 1;
                       printf("Streaming in one direction only.\n\n");
-#if defined(TCP) && ! defined(INFINIBAND) 
+#if defined(TCP) && ! defined(INFINIBAND) && !defined(OPENIB)
                       printf("Sockets are reset between trials to avoid\n");
                       printf("degradation from a collapsing window size.\n\n");
 #endif
@@ -168,7 +168,7 @@ int main(int argc, char **argv)
             case 'u': end = atoi(optarg);
                       break;
 
-#if defined(TCP) && ! defined(INFINIBAND)
+#if defined(TCP) && ! defined(INFINIBAND) && !defined(OPENIB)
             case 'b': /* -b # resets the buffer size, -b 0 keeps system defs */
                       args.prot.sndbufsz = args.prot.rcvbufsz = atoi(optarg);
                       break;
@@ -178,7 +178,7 @@ int main(int argc, char **argv)
                          /* end will be maxed at sndbufsz+rcvbufsz */
                       printf("Passing data in both directions simultaneously.\n");
                       printf("Output is for the combined bandwidth.\n");
-#if defined(TCP) && ! defined(INFINIBAND)
+#if defined(TCP) && ! defined(INFINIBAND) && !defined(OPENIB)
                       printf("The socket buffer size limits the maximum test size.\n\n");
 #endif
                       if( streamopt ) {
@@ -270,7 +270,29 @@ int main(int argc, char **argv)
                           exit(-1);
                       }
                       break;
+#endif
 
+#if defined(OPENIB)
+            case 'm': switch(atoi(optarg)) {
+                        case 256: args.prot.ib_mtu = IBV_MTU_256;
+                          break;
+                        case 512: args.prot.ib_mtu = IBV_MTU_512;
+                          break;
+                        case 1024: args.prot.ib_mtu = IBV_MTU_1024;
+                          break;
+                        case 2048: args.prot.ib_mtu = IBV_MTU_2048;
+                          break;
+                        case 4096: args.prot.ib_mtu = IBV_MTU_4096;
+                          break;
+                        default: 
+                          fprintf(stderr, "Invalid MTU size, must be one of "
+                                          "256, 512, 1024, 2048, 4096\n");
+                          exit(-1);
+                      }
+                      break;
+#endif
+
+#if defined(OPENIB) || defined(INFINIBAND)
             case 't': if( !strcmp(optarg, "send_recv") ) {
                          printf("Using Send/Receive communications\n");
                          args.prot.commtype = NP_COMM_SENDRECV;
@@ -317,7 +339,7 @@ int main(int argc, char **argv)
             case 'n': nrepeat_const = atoi(optarg);
                       break;
 
-#if defined(TCP) && ! defined(INFINIBAND)
+#if defined(TCP) && ! defined(INFINIBAND) && !defined(OPENIB)
             case 'r': args.reset_conn = 1;
                       printf("Resetting connection after every trial\n");
                       break;
@@ -331,7 +353,7 @@ int main(int argc, char **argv)
 
 #endif /* ! defined TCGMSG */
 
-#if defined(INFINIBAND)
+#if defined(OPENIB) || defined(INFINIBAND)
    asyncReceive = 1;
    fprintf(stderr, "Preposting asynchronous receives (required for Infiniband)\n");
    if(args.bidir && (
@@ -377,7 +399,7 @@ int main(int argc, char **argv)
       end = args.upper;
       if( args.tr ) {
          printf("The upper limit is being set to %d Bytes\n", end);
-#if defined(TCP) && ! defined(INFINIBAND)
+#if defined(TCP) && ! defined(INFINIBAND) && !defined(OPENIB)
          printf("due to socket buffer size limitations\n\n");
 #endif
    }  }
@@ -990,7 +1012,7 @@ void VerifyIntegrity(ArgStruct *p)
 void PrintUsage()
 {
     printf("\n NETPIPE USAGE \n\n");
-#if ! defined(INFINIBAND)
+#if ! defined(INFINIBAND) && !defined(OPENIB)
     printf("a: asynchronous receive (a.k.a. preposted receive)\n");
 #endif
     printf("B: burst all preposts before measuring performance\n");
@@ -998,7 +1020,7 @@ void PrintUsage()
     printf("b: specify TCP send/receive socket buffer sizes\n");
 #endif
 
-#if defined(INFINIBAND)
+#if defined(INFINIBAND) || defined(OPENIB)
     printf("c: specify type of completion <-c type>\n"
            "   valid types: local_poll, vapi_poll, event\n"
            "   default: local_poll\n");
@@ -1010,7 +1032,7 @@ void PrintUsage()
     printf("   all MPI-2 implementations\n");
 #endif
 
-#if defined(TCP) || defined(INFINIBAND)
+#if defined(TCP) || defined(INFINIBAND) || defined(OPENIB)
     printf("h: specify hostname of the receiver <-h host>\n");
 #endif
 
@@ -1019,7 +1041,7 @@ void PrintUsage()
     printf("i: Do an integrity check instead of measuring performance\n");
     printf("l: lower bound start value e.g. <-l 1>\n");
 
-#if defined(INFINIBAND)
+#if defined(INFINIBAND) || defined(OPENIB)
     printf("m: set MTU for Infiniband adapter <-m mtu_size>\n");
     printf("   valid sizes: 256, 512, 1024, 2048, 4096 (default 1024)\n");
 #endif
@@ -1030,7 +1052,7 @@ void PrintUsage()
     printf("p: set the perturbation number <-p 1>\n"
            "   (default = 3 Bytes, set to 0 for no perturbations)\n");
 
-#if defined(TCP) && ! defined(INFINIBAND)
+#if defined(TCP) && ! defined(INFINIBAND) && !defined(OPENIB)
     printf("r: reset sockets for every trial\n");
 #endif
 
@@ -1039,7 +1061,7 @@ void PrintUsage()
     printf("S: Use synchronous sends.\n");
 #endif
 
-#if defined(INFINIBAND)
+#if defined(INFINIBAND) || defined(OPENIB)
     printf("t: specify type of communications <-t type>\n"
            "   valid types: send_recv, send_recv_with_imm,\n"
            "                rdma_write, rdma_write_with_imm\n"
@@ -1056,7 +1078,7 @@ void PrintUsage()
 #if defined(MPI)
     printf("   May need to use -a to choose asynchronous communications for MPI/n");
 #endif
-#if defined(TCP) && !defined(INFINIBAND)
+#if defined(TCP) && !defined(INFINIBAND) && !defined(OPENIB)
     printf("   The maximum test size is limited by the TCP buffer size/n");
 #endif
     printf("\n");
@@ -1131,7 +1153,7 @@ void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
 
     memset(p->s_buff, 'b', nbytes+soffset);
 }
-#if !defined(INFINIBAND) && !defined(ARMCI) && !defined(LAPI) && !defined(GPSHMEM) && !defined(SHMEM) && !defined(GM)
+#if !defined(OPENIB) && !defined(INFINIBAND) && !defined(ARMCI) && !defined(LAPI) && !defined(GPSHMEM) && !defined(SHMEM) && !defined(GM) 
 
 void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
 {
