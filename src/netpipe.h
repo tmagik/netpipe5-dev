@@ -20,7 +20,6 @@
 #include <sys/types.h>
 #include <sys/time.h>       /* struct timeval */
 #include <sys/resource.h>   /* getrusage() */
-//#include <unistd.h>         /* getrusage() */
 #include <stdlib.h>         /* malloc(3) */
 
 #ifdef INFINIBAND
@@ -38,8 +37,7 @@
 #define  MEMSIZE            10000000 
 #define  DEFPORT            5002
 #define  NSAMP              8000
-#define  PERT               3
-#define  LATENCYMAX         2e-4
+#define  DEFPERT            3
 #define  LONGTIME           1e99
 #define  CHARSIZE           8
 #define  STOPTM             1.0
@@ -117,19 +115,6 @@
   struct protocolstruct { long nbor, nid; };
 
 #elif defined(LAPI)
-  #include <lapi.h>
-  lapi_handle_t  t_hndl;
-  lapi_cntr_t    l_cntr;
-  lapi_cntr_t    t_cntr;
-  lapi_cntr_t    c_cntr;
-  lapi_info_t    t_info;  /* LAPI info structure */
-  void           *global_addr[2];
-  void           *global_addr1[2];
-  void           *tgt_addr[2];
-  void           *rpt_addr[2];
-  void           *time_addr[2];
-  int            *pRepeat;
-  
   typedef struct protocolstruct ProtocolStruct;   
   struct protocolstruct { int nbor; };
 
@@ -139,8 +124,6 @@
   #else
     #include <mpp/shmem.h>
   #endif
-  double   *pTime;
-  int      *pNrepeat;
   typedef struct protocolstruct ProtocolStruct;
   struct protocolstruct
   {
@@ -163,11 +146,25 @@
 #elif defined(GM)
   #include "gm.h"
   typedef struct protocolstruct ProtocolStruct;
-  struct protocolstruct { int nbor, iproc; };
+  struct protocolstruct
+  { 
+     int nbor, iproc, num_stokens; 
+     unsigned short host_id; /* Host id in routing info of myrinet card */
+  };
 
   struct gm_port *gm_p;
   unsigned long *ltime, *lrpt;
   char *sync, *sync1;
+
+#elif defined(MEMCPY)
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct { int nothing; };
+
+#elif defined(DISK)
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct {
+     char *dfile_name;
+  };
 
 #else
   #error "One of TCP, MPI, TCGMSG, LAPI, SHMEM or PVM must be defined during compilation"
@@ -179,35 +176,30 @@ typedef struct argstruct ArgStruct;
 struct argstruct 
 {
     /* This is the common information that is needed for all tests           */
+    int      cache;         /* Cache flag, 0 => limit cache, 1=> use cache   */
     char     *host;         /* Name of receiving host                        */
-
-#if defined(GM)
-    unsigned short host_id;       /* Host id in routing info of myrinet card       */ 
-#endif
 
     int      servicefd,     /* File descriptor of the network socket         */
              commfd;        /* Communication file descriptor                 */
     short    port;          /* Port used for connection                      */
-    char     *buff;         /* Transmitted buffer                            */
-    char     *buff1;        /* Transmitted buffer                            */
+    char     *r_buff;       /* Aligned receive buffer                        */
+    char     *r_buff_orig;  /* Original unaligned receive buffer             */
+    char     *r_ptr;        /* Pointer to current location in send buffer    */
+    char     *r_ptr_saved;  /* Pointer for saving value of r_ptr             */
+    char     *s_buff;       /* Aligned send buffer                           */
+    char     *s_buff_orig;  /* Original unaligned send buffer                */
+    char     *s_ptr;        /* Pointer to current location in send buffer    */
 
-#if defined(TCGMSG)
-    long      bufflen;      /* Length of transmitted buffer                  */
-    int         tr,         /* Transmit flag                                 */
-              nbuff;        /* Number of buffers to transmit                 */
-#elif defined(GM)
-    unsigned long bufflen;  /* Length of transmitted buffer                  */ 
-    int      tr,            /* Transmit flag                                 */  
-             nbuff;         /* Number of buffers to transmit                 */ 
-#else 
     int      bufflen,       /* Length of transmitted buffer                  */
-             tr,            /* Transmit flag                                 */
+             tr,rcv,        /* Transmit and Recv flags, or maybe neither     */
              nbuff;         /* Number of buffers to transmit                 */
-#endif
+
     int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
+  
+    int      reset_conn;    /* Reset connection flag                         */
 
     /* Now we work with a union of information for protocol dependent stuff  */
-    ProtocolStruct prot;    /* Structure holding necessary info for TCP      */
+    ProtocolStruct prot;
 };
 
 typedef struct data Data;
@@ -222,9 +214,9 @@ struct data
 
 double When();
 
-int Init(ArgStruct *p, int* argc, char*** argv);
+void Init(ArgStruct *p, int* argc, char*** argv);
 
-int Setup(ArgStruct *p);
+void Setup(ArgStruct *p);
 
 void Sync(ArgStruct *p);
 
@@ -244,9 +236,9 @@ void RecvRepeat(ArgStruct *p, int *rpt);
 
 void FreeBuff(char *buff1, char *buff2);
 
-int  CleanUp(ArgStruct *p);
+void CleanUp(ArgStruct *p);
 
-int MyMalloc(ArgStruct *p, int bufflen);
+void MyMalloc(ArgStruct *p, int bufflen);
 
 void Reset(ArgStruct *p);
 
@@ -256,4 +248,16 @@ void flushcache(int *ptr, int n);
 
 void SetIntegrityData(ArgStruct *p);
 
-int VerifyIntegrity(ArgStruct *p);
+void VerifyIntegrity(ArgStruct *p);
+
+void* AlignBuffer(void* buff, int boundary);
+
+void AdvanceSendPtr(ArgStruct* p, int blocksize);
+
+void AdvanceRecvPtr(ArgStruct* p, int blocksize);
+
+void SaveRecvPtr(ArgStruct* p);
+
+void ResetRecvPtr(ArgStruct* p);
+
+void PrintUsage();

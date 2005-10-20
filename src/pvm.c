@@ -15,7 +15,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "$Id: pvm.c,v 1.3 2002/11/13 00:25:04 adoline Exp $";
+    "$Id: pvm.c,v 1.5 2003/03/18 05:08:11 turner Exp $";
 #endif
 
 
@@ -23,17 +23,18 @@ static const char rcsid[] =
 /* Initialialization that needs to occur before                       */
 /* command args are parsed                                            */
 /**********************************************************************/
-int 
+void
 Init(ArgStruct *p, int* pargc, char*** pargv)
 {
-
+   p->tr = 0;     /* The transmitter will be set using the -h host flag. */
+   p->rcv = 1;
 }
 
 /**********************************************************************/
 /* Set up the communcations system.                                   */
 /*    In pvm, this means to join the parallel machine                 */
 /**********************************************************************/
-int
+void
 Setup(ArgStruct *p)
 {
     p->prot.mytid = pvm_mytid();
@@ -154,7 +155,7 @@ SendData(ArgStruct *p)
     printf(" In send \n");
 #endif
     pvm_initsend( PVMDATA );
-    pvm_pkbyte( p->buff, p->bufflen, 1 );
+    pvm_pkbyte( p->s_ptr, p->bufflen, 1 );
     pvm_send( p->prot.othertid, 1 );
 #ifdef DEBUG
     printf(" message sent.  Size=%d\n",p->bufflen);
@@ -171,7 +172,7 @@ RecvData(ArgStruct *p)
     printf(" In receive \n");
 #endif
     pvm_recv( -1, -1);
-    pvm_upkbyte( p->buff, p->bufflen, 1);
+    pvm_upkbyte( p->r_ptr, p->bufflen, 1);
 #ifdef DEBUG
     printf(" message received .  Size=%d \n", p->bufflen);
 #endif
@@ -222,34 +223,51 @@ RecvRepeat(ArgStruct *p, int *rpt)
 /**********************************************************************/
 /* Close down the connection.
 /**********************************************************************/
-int
+void
 CleanUp(ArgStruct *p)
 {
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
-   free(buff1);
-   free(buff2);
+  if(buff1 != NULL)
+    free(buff1);
+
+  if(buff2 != NULL)
+    free(buff2);
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
-    int rc;
-    if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
     {
-        fprintf(stderr,"couldn't allocate memory\n");
-        return -1;
+        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+        exit(-1);
     }
-    if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"Couldn't allocate memory\n");
-        return -1;
-    }
-    return 0;
+
+    if(!p->cache)
+      if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
+        {
+          fprintf(stderr,"Couldn't allocate memory for send buffer\n");
+          exit(-1);
+        }
+
 }
 
 void Reset(ArgStruct *p)
 {
 
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+
+}
+
+void InitBufferData(ArgStruct* p, int nbytes)
+{
+  memset(p->r_buff, 'a', nbytes);
+
+  if(!p->cache)
+    memset(p->s_buff, 'b', nbytes);
 }

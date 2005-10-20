@@ -1,5 +1,0 @@
-#! /bin/csh
-
-ssh -x -a $1 "$cwd/NPtcp -r" &
-sleep 5
-NPtcp -t -h $1

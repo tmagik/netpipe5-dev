@@ -3,9 +3,8 @@
 #include <mpi.h>
 
 MPI_Win win;
-char* buf_orig = NULL;
 
-int Init(ArgStruct *p, int* pargc, char*** pargv)
+void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
   p->prot.use_get = 0;  /* Default to put   */
   p->prot.no_fence = 0; /* Default to fence */
@@ -13,17 +12,17 @@ int Init(ArgStruct *p, int* pargc, char*** pargv)
   MPI_Init(pargc, pargv);
 }
 
-int Setup(ArgStruct *p)
+void Setup(ArgStruct *p)
 {
-  int nproc;
+  int nprocs;
 
   MPI_Comm_rank(MPI_COMM_WORLD, &p->prot.iproc);
 
-  MPI_Comm_size(MPI_COMM_WORLD, &nproc);
+  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-  if (nproc % 2 != 0)
+  if ( nprocs < 2 )
     {
-      printf("Need <multiple of two> processes\n");
+      printf("Need at least 2 processes, we have %d\n", nprocs);
       exit(-2);
     }
 
@@ -39,19 +38,19 @@ int Setup(ArgStruct *p)
   }
 
   /* TODO: Finish changing netpipe such that it can run with > 2 procs */
-  /* 0 <--> (nproc - 1)
-   * 1 <--> (nproc - 2)
+  /* 0 <--> (nprocs - 1)
+   * 1 <--> (nprocs - 2)
    * ...
    */
  
-  p->prot.nbor = (nproc - 1) - p->prot.iproc;
-
-  if (p->prot.iproc % 2 == 0) /* Even procs transmit */
+  p->tr = p->rcv = 0;
+  if (p->prot.iproc == 0) {
     p->tr = 1;
-  else
-    p->tr = 0;
-
-  return 0;
+    p->prot.nbor = nprocs-1;
+  } else if( p->prot.iproc == nprocs-1 ) {
+    p->rcv = 1;
+    p->prot.nbor = 0;
+  }
 }
 
 void Sync(ArgStruct *p)
@@ -66,16 +65,19 @@ void PrepareToReceive(ArgStruct *p)
 
 void SendData(ArgStruct *p)
 {
-  int buf_offset=0;
-  
-  if(buf_orig != NULL) /* Only true if -c was not specified on cmd-line */
-    buf_offset = p->buff - buf_orig; /* offset to the next memory block */
+  int buf_offset = 0;
+
+  /* If we're limiting cache effects, then we need to calculate the offset
+   * from the beginning of the memory pool
+   */
+  if( !p->cache )
+    buf_offset = p->s_ptr - p->s_buff;
 
   if( p->prot.use_get )
-    MPI_Get(p->buff, p->bufflen, MPI_BYTE, p->prot.nbor, buf_offset, 
+    MPI_Get(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, buf_offset, 
             p->bufflen, MPI_BYTE, win);
   else
-    MPI_Put(p->buff, p->bufflen, MPI_BYTE, p->prot.nbor, buf_offset, 
+    MPI_Put(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, buf_offset, 
             p->bufflen, MPI_BYTE, win);
 
   if (p->prot.no_fence == 0)
@@ -86,18 +88,27 @@ void SendData(ArgStruct *p)
 void RecvData(ArgStruct *p)
 {
   /* If user specified 'no fence' option on cmd line, then we try to bypass
-     the fence call by waiting for the last byte to arrive.  The MPI-2
-     standard does not require any data to be written locally until a
-     synchronization call (such as fence) occurs, however, so this may
-     hang, depending on the MPI-2 implementation.  Currently works with
-     MP_Lite */
+   * the fence call by waiting for the last byte to arrive.  The MPI-2
+   * standard does not require any data to be written locally until a
+   * synchronization call (such as fence) occurs, however, so this may
+   * hang, depending on the MPI-2 implementation.  Currently works with
+   * MP_Lite .
+   */
      
   if( p->prot.no_fence ) {
     
-    while(p->buff[p->bufflen-1] != 'b'+p->prot.iproc)
+    /* The conditional in the comparison below is necessary because we are
+     * always waiting for a 'b' to arrive if in no-cache mode, but in cache
+     * mode the character we are waiting for depends on whether we are the
+     * transmitter or receiver.  Adding a little complexity here helps
+     * us avoid more complexity elsewhere with regard to the no-cache code.
+     * We cannot use the same character all the time with cache mode due
+     * to timing issues.
+     */
+    while(p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1) )
       sched_yield();
     
-    p->buff[p->bufflen-1] = 'b'+p->prot.nbor;
+    p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
 
   } else {
 
@@ -131,10 +142,9 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   MPI_Recv(rpt, 1, MPI_INT, p->prot.nbor, 2, MPI_COMM_WORLD, &status);
 }
 
-int CleanUp(ArgStruct *p)
+void CleanUp(ArgStruct *p)
 {
   MPI_Finalize();
-  return 0;
 }
 
 void FreeBuff(char *buff1, char *buff2)
@@ -143,33 +153,51 @@ void FreeBuff(char *buff1, char *buff2)
 
   MPI_Win_free(&win);
 
-  free(buff1);
-  free(buff2);
+  if(buff1 != NULL) 
+    free(buff1);
+  
+  if(buff2 != NULL)
+    free(buff2);
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
-  if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+  if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
+  {
+      fprintf(stderr,"Couldn't allocate memory for receive buffer\n");
+      exit(-1);
+  }
+
+  if(!p->cache)
+
+    if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
     {
-      fprintf(stderr,"Couldn't allocate memory\n");
-      return -1;
+        fprintf(stderr,"Couldn't allocate memory for send buffer\n");
+        exit(-1);
     }
-  p->buff[bufflen-1] = 'b' + p->prot.nbor; /* Used if we are not using Fence 
-                                              during timing runs */
-
-  if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
-    {
-      fprintf(stderr,"Couldn't allocate memory\n");
-      return -1;
-    }
-
-  /* After mallocs, we need to create MPI Windows */
-  MPI_Win_create(p->buff, bufflen, 1, NULL, MPI_COMM_WORLD, &win);
-
-  return 0;
 }
 
 void Reset(ArgStruct *p)
 {
 
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+
+  /* After mallocs and alignment, we need to create MPI Window */
+
+  MPI_Win_create(p->r_buff, p->bufflen, 1, NULL, MPI_COMM_WORLD, &win);
+
+}
+
+void InitBufferData(ArgStruct *p, int nbytes)
+{
+  memset(p->r_buff, 'a', nbytes);
+
+  if(p->cache)
+    p->r_buff[p->bufflen-1] = 'a' + p->tr;
+
+  if(!p->cache)
+    memset(p->s_buff, 'b', nbytes);
 }

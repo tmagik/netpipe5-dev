@@ -17,12 +17,12 @@
 void RCV_(long *type, void *buf, long *lenbuf, long *lenmes, long *nodesel, long *nodefrom, long *sync);
 void SND_(long *type, void *buf, long *lenbuf, long *node, long *sync);
 
-int Init(ArgStruct *p, int* pargc, char*** pargv)
+void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
     PBEGIN_(*pargc, *pargv);
 }
 
-int Setup(ArgStruct *p)
+void Setup(ArgStruct *p)
 {
     long nprocs;
 
@@ -33,21 +33,22 @@ int Setup(ArgStruct *p)
         gethostname(s,253);
         printf("%d: %s\n",p->prot.nid,s); fflush(stdout);
     }
-    p->prot.nbor = !p->prot.nid;
 
-    if (nprocs != 2)
+    if (nprocs < 2)
     {
-        printf("Need two processes, we have %d\n", nprocs);
-        printf("Myproc = %d   nbor = %d\n", p->prot.nid, p->prot.nbor);
-        fflush(stdout);
+        printf("Need at least two processes, we have %d\n", nprocs); fflush(stdout);
         exit(-2);
     }
 
-    if (p->prot.nid == 0)
+    p->tr = p->rcv = 0;
+    if (p->prot.nid == 0) {
         p->tr = 1;
-    else
-        p->tr = 0;
-}   
+        p->prot.nbor = nprocs-1;
+    } else if( p->prot.nid == nprocs-1 ) {
+        p->rcv = 1;
+        p->prot.nbor = 0;
+    }
+}
 
 void Sync(ArgStruct *p)
 {
@@ -68,8 +69,9 @@ void SendData(ArgStruct *p)
 {
   long type = MSGCHR;
   long sync_snd = 0;
-
-    SND_( &type, p->buff, &p->bufflen, &p->prot.nbor, &sync_snd);
+  long lbufflen = p->bufflen;
+  
+    SND_( &type, p->s_ptr, &lbufflen, &p->prot.nbor, &sync_snd);
 }
 
 void RecvData(ArgStruct *p)
@@ -78,9 +80,9 @@ void RecvData(ArgStruct *p)
   long nodefrom;
   long type = MSGCHR;
   long sync_rcv = 1;
- 
+  long lbufflen = p->bufflen;
 
-    RCV_ ( &type, p->buff, &p->bufflen, &lenmes, &p->prot.nbor, &nodefrom, &sync_rcv) ;
+    RCV_ ( &type, p->r_ptr, &lbufflen, &lenmes, &p->prot.nbor, &nodefrom, &sync_rcv) ;
 }
 
 
@@ -132,34 +134,50 @@ void RecvRepeat(ArgStruct *p, int *n)
    RCV_( &ttype, n, &lenbuf, &lenmes, &p->prot.nbor, &nodefrom, &sync_rcv);
 }
 
-int  CleanUp(ArgStruct *p)
+void CleanUp(ArgStruct *p)
 {
         PEND_();
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
-   free(buff1);
-   free(buff2);
+  if(buff1 != NULL)
+    free(buff1);
+
+  if(buff2 != NULL)
+    free(buff2);
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
-    int rc;
-    if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
     {
-        fprintf(stderr,"couldn't allocate memory\n");
-        return -1;
+        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+        exit(-1);
     }
-    if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"Couldn't allocate memory\n");
-        return -1;
-    }
-    return 0;
+
+    if(!p->cache)
+      if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
+      {
+          fprintf(stderr,"Couldn't allocate memory for send buffer\n");
+          exit(-1);
+      }
 }
 
 void Reset(ArgStruct *p)
+{
+
+}
+
+void InitBufferData(ArgStruct *p, int nbytes)
+{
+  memset(p->r_buff, 'a', nbytes);
+
+  if(!p->cache)
+    memset(p->s_buff, 'b', nbytes);
+}
+
+void AfterAlignmentInit(ArgStruct *p)
 {
 
 }

@@ -57,33 +57,17 @@ static VAPI_qp_cap_t       qp_cap;
 static VAPI_wc_desc_t      wc;
 static int                 max_wq=15000;
 
-/* Other important globals */
-int ib_cache_effects;
-
-#if defined (MPLITE)
-#include "mplite.h"
-#endif
-
-ArgStruct *args_p;
-
-void handler(int sig)
-{
-  fprintf(stderr, "Received INT signal, cleaning up...\n");
-  fprintf(stderr, "\n(User needs to send INT signal to both nodes\n");
-  fprintf(stderr, " before cleanup can begin)\n\n");
-  CleanUp(args_p);
-  exit(0);
-}
-
-int Init(ArgStruct *p, int* pargc, char*** pargv)
+void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
   p->prot.ib_mtu = MTU1024;
+  p->tr = 0;
+  p->rcv = 1;
 }
 
-int Setup(ArgStruct *p)
+void Setup(ArgStruct *p)
 {
 
- int tr, one = 1;                 /* tr==1 if process is a transmitter */
+ int one = 1;
  int sockfd;
  struct sockaddr_in *lsin1, *lsin2;      /* ptr to sockaddr_in in ArgStruct */
  char *host;
@@ -97,16 +81,7 @@ int Setup(ArgStruct *p)
  sprintf(logfilename, ".iblog%d", 1 - p->tr);
  logfile = fopen(logfilename, "w");
 
- /* Register signal handler for <CTRL-C> so we can shut Infiniband down
-    properly if user decides to bail */
-
- args_p = p; /* Assuming we'll always use same ArgStruct */
- sigact1.sa_handler = handler;
- sigaction(SIGINT, &sigact1, NULL);
-
  host = p->host;                           /* copy ptr to hostname */ 
- tr = p->tr;                               /* copy tr indicator */
-
 
  lsin1 = &(p->prot.sin1);
  lsin2 = &(p->prot.sin2);
@@ -124,7 +99,7 @@ int Setup(ArgStruct *p)
    exit(555);
  }
 
- if (tr){                                  /* if client i.e., Sender */
+ if (p->tr){                                  /* if client i.e., Sender */
 
 
    if (atoi(host) > 0) {                   /* Numerical IP address */
@@ -158,7 +133,7 @@ int Setup(ArgStruct *p)
 
  }
 
- if(tr)
+ if(p->tr)
    p->commfd = sockfd;
  else
    p->servicefd = sockfd;
@@ -173,9 +148,6 @@ int Setup(ArgStruct *p)
    CleanUp(p);
    exit(-1);
  }
-
- return(0);
- 
 }   
 
 static int
@@ -186,7 +158,7 @@ readFully(int fd, void *obuf, int len)
   int bytesRead = 0;
 
   while (bytesLeft > 0 &&
-	 (bytesRead = read(fd, (void *) buf, bytesLeft)) > 0)
+        (bytesRead = read(fd, (void *) buf, bytesLeft)) > 0)
     {
       bytesLeft -= bytesRead;
       buf += bytesRead;
@@ -202,15 +174,15 @@ void Sync(ArgStruct *p)
     char response[7];
 
     if (write(p->commfd, s, strlen(s)) < 0 ||
-	readFully(p->commfd, response, strlen(s)) < 0)
+        readFully(p->commfd, response, strlen(s)) < 0)
       {
-	perror("NetPIPE: error writing or reading synchronization string");
-	exit(3);
+        perror("NetPIPE: error writing or reading synchronization string");
+        exit(3);
       }
     if (strncmp(s, response, strlen(s)))
       {
-	fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
-	exit(3);
+        fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
+        exit(3);
       }
 }
 
@@ -227,12 +199,9 @@ void PrepareToReceive(ArgStruct *p)
   rr.sg_lst_len = 1;
   rr.sg_lst_p = &sg_entry;
 
-  sg_entry.lkey = ib_cache_effects ? s_mr_out.l_key : r_mr_out.l_key;
+  sg_entry.lkey = r_mr_out.l_key;
   sg_entry.len = p->bufflen;
-  sg_entry.addr = (VAPI_virt_addr_t)(virt_addr_t)p->buff;
-
-  /* Reset last byte */
-  //p->buff1[p->bufflen-1] = 'b';
+  sg_entry.addr = (VAPI_virt_addr_t)(virt_addr_t)p->r_ptr;
 
   ret = VAPI_post_rr(hca_hndl, qp_hndl, &rr);
   if(ret != VAPI_OK) {
@@ -255,21 +224,17 @@ void SendData(ArgStruct *p)
 
   sr.opcode = VAPI_SEND;
   sr.comp_type = VAPI_UNSIGNALED;
-  sr.set_se = FALSE; /* Set solicited event flag, not using events */
+  sr.set_se = FALSE;  /* Set solicited event flag, not using events */
   sr.remote_qkey = 0; /* Remote Queue Pair key */
-  sr.id = 1; /* Request ID */
+  sr.id = 1;          /* Request ID */
 
   sr.sg_lst_len = 1;
   sr.sg_lst_p = &sg_entry;
 
   sg_entry.lkey = s_mr_out.l_key; /* Local memory region key */
   sg_entry.len = p->bufflen;
-  sg_entry.addr = (VAPI_virt_addr_t)(virt_addr_t)p->buff;
+  sg_entry.addr = (VAPI_virt_addr_t)(virt_addr_t)p->s_ptr;
 
-  /* Set last byte */
-  //p->buff[p->bufflen-1] = 'c';
-  /* Last byte should already be 'c' */
-  
   ret = VAPI_post_sr(hca_hndl, qp_hndl, &sr);
   if(ret != VAPI_OK) {
     fprintf(stderr, "  Error posting send request: %s\n", VAPI_strerror(ret));
@@ -281,17 +246,16 @@ void SendData(ArgStruct *p)
 
 void RecvData(ArgStruct *p)
 {
-  static int count=0;
   VAPI_ret_t ret;
 
   /* Busy wait for incoming data */
 
-  while(p->buff[p->bufflen-1] != 'b'+(1 - p->tr)) {
-    if(p->bufflen % 2 == 3) printf("");
+  while(p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1) ) {
+    if((int)p % 2 == 3) printf("");
   }
 
   /* Reset last byte */
-  p->buff[p->bufflen-1] = 'b'+p->tr;
+  p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
 
   LOGPRINTF("  Received all of data\n");
 
@@ -371,8 +335,8 @@ void SendTime(ArgStruct *p, double *t)
     ntime = htonl(ltime);
     if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
       {
-	printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
-	exit(301);
+        printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
+        exit(301);
       }
 }
 
@@ -384,14 +348,14 @@ void RecvTime(ArgStruct *p, double *t)
     bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
     if (bytesRead < 0)
       {
-	printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
-	exit(302);
+        printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
+        exit(302);
       }
     else if (bytesRead != sizeof(unsigned long))
       {
-	fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
-		bytesRead);
-	exit(303);
+        fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
+                bytesRead);
+        exit(303);
       }
     ltime = ntohl(ntime);
 
@@ -427,7 +391,7 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   else if (bytesRead != sizeof(unsigned long))
     {
       fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
-	      bytesRead);
+              bytesRead);
       exit(306);
     }
   lrpt = ntohl(nrpt);
@@ -444,7 +408,7 @@ int establish(ArgStruct *p)
  clen = sizeof(p->prot.sin2);
  if(p->tr){
    if(connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
-	      sizeof(p->prot.sin1)) < 0){
+              sizeof(p->prot.sin1)) < 0){
      printf("Client: Cannot Connect! errno=%d\n",errno);
      exit(-10);
    }
@@ -453,18 +417,16 @@ int establish(ArgStruct *p)
     /* SERVER */
     listen(p->servicefd, 5);
     p->commfd = accept(p->servicefd, (struct sockaddr *) &(p->prot.sin2),
-		       &clen);
+                       &clen);
 
     if(p->commfd < 0){
       printf("Server: Accept Failed! errno=%d\n",errno);
       exit(-12);
     }
   }
-
-  return 0;
 }
 
-int  CleanUp(ArgStruct *p)
+void CleanUp(ArgStruct *p)
 {
    char *quit="QUIT";
    if (p->tr)
@@ -482,8 +444,6 @@ int  CleanUp(ArgStruct *p)
    }
 
    finalizeIB(p);
-
-   return 0;    /* Damn SGI compilers want this */
 }
 
 void FreeBuff(char *buff1, char *buff2)
@@ -510,67 +470,76 @@ void FreeBuff(char *buff1, char *buff2)
     }
   }
 
-  free(buff1);
-  free(buff2);
+  if(buff1 != NULL)
+    free(buff1);
+
+  if(buff2 != NULL)
+    free(buff2);
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
   VAPI_ret_t ret;
 
-  /* Register send buffer */
+  /* Register recv buffer */
 
-  p->buff = VMALLOC(bufflen);
-  if(p->buff == NULL) {
+  p->r_buff = VMALLOC(bufflen);
+  if(p->r_buff == NULL) {
     fprintf(stderr, "Error malloc'ing buffer\n");
-    return -1;
+    exit(-1);
   }
-  memset(p->buff, 'b', bufflen-1);
-  p->buff[bufflen-1] = 'b' + p->tr;
 
   mr_in.acl = VAPI_EN_LOCAL_WRITE | VAPI_EN_REMOTE_WRITE;
   mr_in.l_key = 0;
   mr_in.pd_hndl = pd_hndl;
   mr_in.r_key = 0;
   mr_in.size = bufflen;
-  mr_in.start = (VAPI_virt_addr_t)(virt_addr_t)p->buff;
-  mr_in.type = VAPI_MR;
-
-  ret = VAPI_register_mr(hca_hndl, &mr_in, &s_mr_hndl, &s_mr_out);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "Error registering send buffer: %s\n", VAPI_strerror(ret));
-    return -1;
-  } else {
-    LOGPRINTF("Registered Send Buffer\n");
-  }
-
-
- /* Register recv buffer */
-
-  p->buff1 = VMALLOC(bufflen);
-  if(p->buff1 == NULL) {
-    fprintf(stderr, "Error malloc'ing buffer\n");
-    return -1;
-  }
-  memset(p->buff1, 'b', bufflen);
-
-  mr_in.acl = VAPI_EN_LOCAL_WRITE | VAPI_EN_REMOTE_WRITE;
-  mr_in.l_key = 0;
-  mr_in.pd_hndl = pd_hndl;
-  mr_in.r_key = 0;
-  mr_in.size = bufflen;
-  mr_in.start = (VAPI_virt_addr_t)(virt_addr_t)p->buff1;
+  mr_in.start = (VAPI_virt_addr_t)(virt_addr_t)p->r_buff;
   mr_in.type = VAPI_MR;
 
   ret = VAPI_register_mr(hca_hndl, &mr_in, &r_mr_hndl, &r_mr_out);
   if(ret != VAPI_OK) {
     fprintf(stderr, "Error registering recv buffer: %s\n", VAPI_strerror(ret));
-    return -1;
+    exit(-1);
   } else {
     LOGPRINTF("Registered Recv Buffer\n");
   }
 
-  return 0;
+  /* Register send buffer */
+
+  if(p->cache) {
+    
+    /* Infiniband spec says we can register same memory region
+     * more than once, so just copy buffer address
+     */
+    p->s_buff = p->r_buff;
+
+  } else {
+
+    p->s_buff = VMALLOC(bufflen);
+    if(p->s_buff == NULL) {
+      fprintf(stderr, "Error malloc'ing buffer\n");
+      exit(-1);
+    }
+
+  }
+
+  mr_in.acl = VAPI_EN_LOCAL_WRITE | VAPI_EN_REMOTE_WRITE;
+  mr_in.l_key = 0;
+  mr_in.pd_hndl = pd_hndl;
+  mr_in.r_key = 0;
+  mr_in.size = bufflen;
+  mr_in.start = (VAPI_virt_addr_t)(virt_addr_t)p->s_buff;
+  mr_in.type = VAPI_MR;
+  
+  ret = VAPI_register_mr(hca_hndl, &mr_in, &s_mr_hndl, &s_mr_out);
+  if(ret != VAPI_OK) {
+    fprintf(stderr, "Error registering send buffer: %s\n", VAPI_strerror(ret));
+    exit(-1);
+  } else {
+    LOGPRINTF("Registered Send Buffer\n");
+  }
+
 }
 
 int initIB(ArgStruct *p)
@@ -857,4 +826,32 @@ int finalizeIB(ArgStruct *p)
   }
 
   return 0;
+}
+
+
+void InitBufferData(ArgStruct *p, int nbytes)
+{
+  memset(p->r_buff, 'a', nbytes);
+
+  /* If using cache mode, then we need to initialize the last byte
+   * to the proper value since the transmitter and receiver are waiting
+   * on different values to determine when the message has completely
+   * arrive.
+   */
+  if(p->cache)
+
+    p->r_buff[nbytes-1] = 'a' + p->tr;
+
+  /* If using no-cache mode, then we have distinct send and receive
+   * buffers, so the send buffer starts out containing different values
+   * from the receive buffer
+   */
+  else
+
+    memset(p->s_buff, 'b', nbytes);
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+
 }

@@ -19,19 +19,21 @@ char *messbuff;
 #endif
 
 /* Initialize vars in Init() that may be changed by parsing the command args */
-int Init(ArgStruct *p, int* pargc, char*** pargv)
+
+void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
   p->source_node = 0;  /* Default source node */
 
   MPI_Init(pargc, pargv);
 }
 
-int Setup(ArgStruct *p)
+void Setup(ArgStruct *p)
 {
-    int nproc;
+    int nprocs;
 
     MPI_Comm_rank(MPI_COMM_WORLD, &p->prot.iproc);
-    MPI_Comm_size(MPI_COMM_WORLD, &nproc);
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
     {
         char s[255], *ptr;
         gethostname(s,253);
@@ -42,24 +44,27 @@ int Setup(ArgStruct *p)
         printf("%d: %s\n",p->prot.iproc,s);
         fflush(stdout);
     }
-    p->prot.nbor = !p->prot.iproc;
+
+    if (nprocs < 2)
+    {
+        printf("Need at least two processes (only given %d)\n", nprocs);
+        exit(-2);
+    }
+
+    p->tr = p->rcv = 0;
+    if( p->prot.iproc == 0 ) {
+        p->tr = 1;
+        p->prot.nbor = nprocs-1;
+    } else if( p->prot.iproc == nprocs-1 ) {
+        p->rcv = 1;
+        p->prot.nbor = 0;
+    }
 
        /* p->source_node may already have been set to -1 (MPI_ANY_SOURCE)
         * by specifying a -z on the command line.  If not, set the source
         * node normally. */
 
-    if( p->source_node == 0 ) p->source_node = !p->prot.iproc;
-
-    if (nproc != 2)
-    {
-        printf("Need two processes\n");
-        exit(-2);
-    }
-
-    if (p->prot.iproc == 0)
-        p->tr = 1;
-    else
-        p->tr = 0;
+    if( p->source_node == 0 ) p->source_node = p->prot.nbor;
 
 #ifdef BSEND
     messbuff = (char *)malloc(MAXBUFSIZE * sizeof(char));
@@ -70,8 +75,6 @@ int Setup(ArgStruct *p)
     }
     MPI_Buffer_attach(messbuff, MAXBUFSIZE);
 #endif
-
-   return 0;    /* Damn SGI compilers want this */
 }   
 
 void Sync(ArgStruct *p)
@@ -95,7 +98,7 @@ void PrepareToReceive(ArgStruct *p)
         printf("Can't prepare to receive: outstanding receive!\n");
         exit(-1);
     }
-    MPI_Irecv(p->buff, p->bufflen, MPI_BYTE,
+    MPI_Irecv(p->r_ptr, p->bufflen, MPI_BYTE,
     p->source_node, 1, MPI_COMM_WORLD, &recvRequest);
     recvPosted = -1;
 }
@@ -103,9 +106,9 @@ void PrepareToReceive(ArgStruct *p)
 void SendData(ArgStruct *p)
 {
 #ifdef BSEND
-    MPI_Bsend(p->buff, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
+    MPI_Bsend(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
 #else
-    MPI_Send(p->buff, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
+    MPI_Send(p->s_ptr, p->bufflen, MPI_BYTE, p->prot.nbor, 1, MPI_COMM_WORLD);
 #endif
 }
 
@@ -119,7 +122,7 @@ void RecvData(ArgStruct *p)
     }
     else
     {
-        MPI_Recv(p->buff, p->bufflen, MPI_BYTE, 
+        MPI_Recv(p->r_ptr, p->bufflen, MPI_BYTE, 
         p->source_node, 1, MPI_COMM_WORLD, &status);
     }
 }
@@ -158,35 +161,54 @@ void RecvRepeat(ArgStruct *p, int *rpt)
     MPI_Recv(rpt, 1, MPI_INT, p->source_node, 2, MPI_COMM_WORLD, &status);
 }
 
-int  CleanUp(ArgStruct *p)
+void CleanUp(ArgStruct *p)
 {
    MPI_Finalize();
-   return 0;    /* Damn SGI compilers want this */
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
+  if(buff1 != NULL)
+
    free(buff1);
+
+
+  if(buff2 != NULL)
+
    free(buff2);
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
-    int rc;
-    if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
     {
-        fprintf(stderr,"couldn't allocate memory\n");
-        return -1;
+        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+        exit(-1);
     }
-    if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"Couldn't allocate memory\n");
-        return -1;
-    }
-    return 0;
+    
+    if(!p->cache) /* Allocate second buffer if limiting cache */
+      if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
+      {
+          fprintf(stderr,"couldn't allocate memory for send buffer\n");
+          exit(-1);
+      }
+    
 }
 
 void Reset(ArgStruct *p)
 {
 
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+
+}
+
+void InitBufferData(ArgStruct *p, int nbytes)
+{
+    memset(p->r_buff, 'a', nbytes);
+
+    if(!p->cache)
+      memset(p->s_buff, 'b', nbytes);
 }

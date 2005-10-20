@@ -16,6 +16,16 @@ software layers they run upon.
 Release 3.3 includes an Infiniband module for the Mellanox VAPI.
 It also has an integrity check (-i), which is still being developed.
 
+Release 3.5 removes the CPU utilization measurements.  Getrusage is
+probably not very accurate, so a dummy workload will eventually be
+used instead.
+The streaming mode has also been fixed.  When run at Gigabit speeds,
+the TCP window size would collapse limit performance of subsequent
+data points.  Now we reset the sockets between trials to prevent this.
+We have also added in a module to evaluate memory copy rates.
+-n now sets a constant number of repeats for each trial.
+-r resets the sockets between each trial (automatic for streaming).
+
 If you have problems or comments, please email netpipe@scl.ameslab.gov
 
 ____________________________________________________________________________
@@ -83,17 +93,22 @@ NetPIPE is run, and are in order of their general usefulness.
 
         -f: MPI-2: do not use a fence call (may not work for all packages)
 
+        -I: Invalidate cache: Take measures to eliminate the effects cache
+            has on performance.
 
 	-A: specify buffers alignment e.g. "-A 4096"
             buffers are page-aligned by default
 
 	-a: asynchronous receive (a.k.a. pre-posted receive)
 		May not have any effect, depending on your implementation
+        
+        -B: burst all preposts before measuring performance
+                Normally only one receive is preposted at a time with -a
 
-	-i: specify increment step size e.g. "-i 64"
-		Default is exponential increment calculated at runtime
+        -P: turn off perturbations of buffer size
 
-	-O: specify buffer offset e.g. "-O 127"
+	-i: Integrity check: Check the integrity of data transfer instead
+            of performance
 
 	-s: stream option (default mode is "ping pong")
 		If this option is used, it must be specified on both
@@ -103,8 +118,8 @@ NetPIPE is run, and are in order of their general usefulness.
    ---
 
       Compile NetPIPE using 'make tcp'
-      other_host> NPtcp -r [options]
-      local_host> NPtcp -t -h other_host [options]
+      other_host> NPtcp [options]
+      local_host> NPtcp -h other_host [options]
 
    MPICH
    -----
@@ -153,8 +168,8 @@ NetPIPE is run, and are in order of their general usefulness.
         pvm> help           --> lists all commands
         pvm> add other_host --> will start a pvmd on a machine called 'host2'
         pvm> quit           --> when you have all the pvmd machines started
-      other_host> NPpvm -r [options]
-      local_host> NPpvm -t -h other_host [options]
+      other_host> NPpvm [options]
+      local_host> NPpvm -h other_host [options]
       Changing PVMDATA in netpipe.h and PvmRouteDirect in pvm.c can
         effect the performance greatly.
 
@@ -195,11 +210,45 @@ NetPIPE is run, and are in order of their general usefulness.
 
       Install the GM package and configure the Myrinet cards
       Compile NetPIPE using 'make gm'
-      other_host> NPgm -r [options]
-      local_host> NPgm -t -h other_host [options]
+      other_host> NPgm [options]
+      local_host> NPgm -h other_host [options]
 
-   LAPI   (Xuehua, please fill this out)
+   LAPI
    ----
+
+      Log into IBM SP machine at NERSC
+      Compile NetPIPE using 'make lapi'
+
+      To run interactively at NERSC:
+
+      Set environment variable MP_MSG_API to lapi
+        e.g. 'setenv MP_MSG_API lapi', 'export MP_MSG_API=lapi'
+      Run NPlapi with '-procs 2' to tell the parallel environment you
+        want 2 nodes.  Use any other options that are applicable to
+        NetPIPE.
+
+      To submit a batch job at NERSC:
+
+      Copy the file batchLapi from the 'hosts' directory to the directory
+        containing NPlapi.
+      Edit the copy of batchLapi:
+                job_name: Identifying name of job, can be anything
+                output:   File to send stdout to
+                error:    File to send stderr to (most of NetPIPE's output
+                                will go here)
+                tasks_per_node: Number of tasks to be run on each node
+                node:           Number of nodes to run on
+                (Use a combination of the above two options to determine
+                 how NetPIPE runs.  Use 1 task per node and 2 nodes to run
+                 benchmark between nodes.  Use 2 tasks per node and 1 node
+                 to run benchmark on single node)
+
+                Use whatever command-line options are appropriate for NetPIPE
+
+      Submit the job with the command 'llsubmit batchLapi'
+      Check status of all your jobs with 'llqs -u <user>'
+      You should receive an email when the job finishes.  The resulting output
+        files will then be available.
 
    ARMCI
    -----   
@@ -223,12 +272,12 @@ NetPIPE is run, and are in order of their general usefulness.
       Compile NetPIPE using 'make ib' (The environment variable MTHOME needs
         to be set to the directory containing the include and lib directories
         for the Mellanox software).
-      other_host> NPib -r
-      local_host> NPib -t -h other_host
+      other_host> NPib
+      local_host> NPib -h other_host
       (other_host should be the ip address or dns name of the other host)
         
-      Other options:  add -B switch to both other and local host command
-        lines to prepost all receives before each timed run commences.
+      Other options:  Use -m to select mtu size for Infiniband adapter.
+        Valid values are 256, 512, 1024, 2048, 4096.  Default is 1024.
 
 Interpreting the Results
 ------------------------
@@ -242,6 +291,51 @@ created by graphing the time column versus the bits per second column
 graph is important and how to interpret it).  The more traditional
 "throughput versus block size" graph can be created by
 graphing the bytes column versus the bits per second column.
+
+Invalidating Cache
+------------------
+
+The -I switch can be used to reduce the effects cache has on performance.  
+Without the switch, NetPIPE tests the performance of communicating 
+n-byte blocks by reading from an n-byte buffer on one node, sending data 
+over the communications link, and writing to an n-byte buffer on the other 
+node.  For each block size, this trial will be repeated x times, where x
+typically starts out very large for small block sizes, and decreases as the
+block size grows.  The same buffers on each node are used repeatedly, so
+after the first transfer the entire buffer will be in cache on each node,
+given that the block-size is less than the available cache.  Thus each transfer
+after the first will be read from cache on one end and written into cache on
+the other.  Depending on the cache architecture, a write to main memory may
+not occur on the receiving end during the transfer loop.
+
+While the performance measurements obtained from this method are certainly 
+useful, it is also interesting to use the -I switch to measure performance 
+when data is read from and written to main memory.  In order to facilitate 
+this, large pools of memory are allocated at startup, and each n-byte transfer 
+comes from a region of the pool not in cache.  Before each series of n-byte 
+transfers, every byte of a large dummy buffer is individually accessed in 
+order to flush the data for the transfer out of cache.  After this step, the 
+first n-byte transfer comes from the beginning of the large pool, the second 
+comes from n-bytes after the beginning of the pool, and so on (note that stride
+between n-byte transfers will depend on the buffer alignment setting).  In this
+way we make sure each read is coming from main memory.
+
+On the receiving end data is written into a large pool in the same fashion 
+that it was read on the transmitting end.  Data will first be written into 
+cache.  What happens next depends on the cache architecture, but one case is 
+that no transfer to main memory occurs, YET.  For moderately large block 
+sizes, however, a large number of transfer iterations will cause reuse of 
+cache memory.  As this occurs, data in the cache location to be replaced must 
+be written back to main memory, so we incur a performance penalty while we 
+wait for the write.
+
+In summary, using the -I switch gives worst-case performance (i.e. all data
+transfers involve reading from or writing to memory not in cache) and not
+using the switch gives best-case performance (i.e. all data transfers involve
+only reading from or writing to memory in cache).  Note that other combinations,
+such as reading from memory in cache and writing to memory not in cache, would
+give intermediary results.  We chose to implement the methods that will measure
+the two extremes.
 
 Changes
 -------

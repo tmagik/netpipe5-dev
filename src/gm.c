@@ -4,12 +4,13 @@ extern struct gm_port *gm_p;
 extern unsigned long *ltime, *lrpt;
 extern char *sync, *sync1;
 
-int Init(ArgStruct *p, int* pargc, char*** pargv)
+void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
-
+  p->tr = 0;
+  p->rcv = 1;
 }
 
-int Setup(ArgStruct *p)
+void Setup(ArgStruct *p)
 {
   char * host;
   
@@ -23,7 +24,7 @@ int Setup(ArgStruct *p)
   else
     printf("Opened board 0 port2\n");
   
-  p->host_id = gm_host_name_to_node_id(gm_p, host);
+  p->prot.host_id = gm_host_name_to_node_id(gm_p, host);
   gm_free_send_tokens(gm_p, GM_LOW_PRIORITY, gm_num_send_tokens(gm_p));
   ltime = gm_dma_malloc(gm_p, sizeof(unsigned long));
   lrpt  = gm_dma_malloc(gm_p, sizeof(unsigned long)); 
@@ -32,6 +33,9 @@ int Setup(ArgStruct *p)
   sprintf(sync, "Syncme");   
 
   establish(p);
+
+  p->prot.num_stokens = gm_num_send_tokens(gm_p);
+
 }   
 
 void my_send_callback (struct gm_port *port, void *context, gm_status_t status)
@@ -46,7 +50,6 @@ void my_send_callback (struct gm_port *port, void *context, gm_status_t status)
   }
 }
 
-
 int establish(ArgStruct *p)
 {
   gm_recv_event_t *e;
@@ -54,26 +57,26 @@ int establish(ArgStruct *p)
   char temp[60];
   int todo = 1;
 
-  if((p->buff = gm_dma_calloc(gm_p, 1, 64)) == 0) {
+  if((p->r_buff = gm_dma_calloc(gm_p, 1, 64)) == 0) {
     printf("Couldn't allocate memory \n");
     exit(0);
   } 
 
-  if((p->buff1= gm_dma_calloc(gm_p, 1, 64)) == 0) {
+  if((p->s_buff = gm_dma_calloc(gm_p, 1, 64)) == 0) {
     printf("Couldn't allocate memory \n"); 
     exit(0);
   }
 
 
   if(p->tr){
-    sprintf(p->buff, "this is the sender!!");
-    gm_send_to_peer_with_callback(gm_p, p->buff, 7,
-            (unsigned long) strlen(p->buff), GM_LOW_PRIORITY, 
-             p->host_id, my_send_callback, NULL);
+    sprintf(p->s_buff, "this is the sender!!");
+    gm_send_to_peer_with_callback(gm_p, p->s_buff, 7,
+            (unsigned long) strlen(p->s_buff), GM_LOW_PRIORITY, 
+             p->prot.host_id, my_send_callback, NULL);
   } 
   else 
   {
-    gm_provide_receive_buffer(gm_p, p->buff1, 7, GM_LOW_PRIORITY); 
+    gm_provide_receive_buffer(gm_p, p->r_buff, 7, GM_LOW_PRIORITY); 
     while (todo) {
       e = gm_receive(gm_p);    
  
@@ -81,10 +84,12 @@ int establish(ArgStruct *p)
         case GM_RECV_EVENT:
         case GM_PEER_RECV_EVENT:
         case GM_FAST_PEER_RECV_EVENT:
+          /*
           printf("[recv] Received: \"%s\"\n",
                     (char *) gm_ntohp (e->recv.message));
+          */
           recv_sz=(int) gm_ntoh_u32 (e->recv.length);
-          p->host_id= gm_ntoh_u16(e->recv.sender_node_id);
+          p->prot.host_id= gm_ntoh_u16(e->recv.sender_node_id);
           todo--;
           break;
         case GM_NO_RECV_EVENT:
@@ -95,7 +100,6 @@ int establish(ArgStruct *p)
     }  
   }
 } 
-
 
 int readFully(void *buff, int len) 
 {
@@ -134,9 +138,13 @@ void Sync(ArgStruct *p)
 {
   int len; 
   len=strlen(sync);
-  gm_send_to_peer_with_callback(gm_p, sync, gm_min_size_for_length(len), (unsigned long) (len+1),
-          GM_LOW_PRIORITY, p->host_id, my_send_callback, NULL); 
-  gm_provide_receive_buffer(gm_p, sync1, gm_min_size_for_length(len), GM_LOW_PRIORITY); 
+  gm_send_to_peer_with_callback(gm_p, sync, gm_min_size_for_length(len), 
+                                (unsigned long) (len+1), GM_LOW_PRIORITY, 
+                                p->prot.host_id, my_send_callback, NULL); 
+
+  gm_provide_receive_buffer(gm_p, sync1, gm_min_size_for_length(len), 
+                            GM_LOW_PRIORITY); 
+
   readFully(sync1,len+1);
 }
 
@@ -150,15 +158,19 @@ void PrepareToReceive(ArgStruct *p)
 
 void SendData(ArgStruct *p)
 {
-    gm_send_to_peer_with_callback(gm_p, p->buff, gm_min_size_for_length(p->bufflen), p->bufflen,
-          GM_LOW_PRIORITY, p->host_id, my_send_callback, NULL);
+    gm_send_to_peer_with_callback(gm_p, p->s_ptr, 
+                                  gm_min_size_for_length(p->bufflen), 
+                                  p->bufflen, GM_LOW_PRIORITY, 
+                                  p->prot.host_id, my_send_callback, NULL);
 }
-
+ 
 void RecvData(ArgStruct *p)
 {
-   gm_provide_receive_buffer(gm_p, p->buff1, gm_min_size_for_length(p->bufflen), GM_LOW_PRIORITY); 
-   readFully(p->buff1,p->bufflen);
-
+   gm_provide_receive_buffer(gm_p, p->r_ptr, 
+                             gm_min_size_for_length(p->bufflen), 
+                             GM_LOW_PRIORITY);
+ 
+   readFully(p->r_ptr, p->bufflen);
 } 
 
 void SendTime(ArgStruct *p, double *t)
@@ -170,7 +182,7 @@ void SendTime(ArgStruct *p, double *t)
       */
     *ltime = (unsigned long)(*t * 1.e6);
     gm_send_to_peer_with_callback(gm_p, ltime, gm_min_size_for_length(sizeof(unsigned long)), sizeof(unsigned long),
-          GM_LOW_PRIORITY, p->host_id, my_send_callback, NULL);
+          GM_LOW_PRIORITY, p->prot.host_id, my_send_callback, NULL);
 }
 
 void RecvTime(ArgStruct *p, double *t)
@@ -189,7 +201,7 @@ void SendRepeat(ArgStruct *p, int rpt)
   *lrpt = (int)rpt;
   /* Send repeat count as a long in network order */
   gm_send_to_peer_with_callback(gm_p, lrpt, gm_min_size_for_length(sizeof(unsigned long)), sizeof(unsigned long),
-          GM_LOW_PRIORITY, p->host_id, my_send_callback, NULL);
+          GM_LOW_PRIORITY, p->prot.host_id, my_send_callback, NULL);
 }
 
 void RecvRepeat(ArgStruct *p, int *rpt)
@@ -199,37 +211,53 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   *rpt =(int)*lrpt;
 }
 
-int  CleanUp(ArgStruct *p)
+void CleanUp(ArgStruct *p)
 {
    sleep(2); 
    gm_close(gm_p);
    gm_exit(GM_SUCCESS);
    gm_finalize();
-   return 0;    /* Damn SGI compilers want this */
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
-  int rc;
-  if((p->buff = (char *)gm_dma_malloc(gm_p, bufflen))==(char *)NULL) {
-      fprintf(stderr,"couldn't allocate memory\n");
-    return -1;
-  }
-  if((p->buff1 =(char *)gm_dma_malloc(gm_p, bufflen))==(char *)NULL)
+  if((p->r_buff = (char *)gm_dma_malloc(gm_p, bufflen))==(char *)NULL) 
   {
-      fprintf(stderr,"Couldn't allocate memory\n");
-      return -1;
+      fprintf(stderr,"couldn't allocate memory\n");
+      exit(-1);
   }
-  return 0;
+
+  if(!p->cache)
+    if((p->s_buff = (char *)gm_dma_malloc(gm_p, bufflen))==(char *)NULL)
+    {
+        fprintf(stderr,"Couldn't allocate memory\n");
+        exit(-1);
+    }
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
-  gm_dma_free(gm_p, buff1);
-  gm_dma_free(gm_p, buff2);
+  if(buff1 != NULL)
+    gm_dma_free(gm_p, buff1);
+
+  if(buff2 != NULL)
+    gm_dma_free(gm_p, buff2);
 }
 
 void Reset(ArgStruct *p)
+{
+
+}
+
+void InitBufferData(ArgStruct *p, int nbytes)
+{
+  memset(p->r_buff, 'a', nbytes);
+
+  if(!p->cache)
+    memset(p->s_buff, 'b', nbytes);
+}
+
+void AfterAlignmentInit(ArgStruct *p)
 {
 
 }

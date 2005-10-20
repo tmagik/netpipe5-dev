@@ -13,7 +13,7 @@ extern int    *pNrepeat;
 
 
 int npes, mype;
-char* buf_orig = NULL;
+int nbor_r_buff_offset;
 
 struct mnode_t {
     void *ptrs[2];   /* Will only use 2 pointers */
@@ -36,22 +36,22 @@ struct mnode_t *mfind(void* ptr, struct mnode_t** prev) {
     struct mnode_t *p, *n;
 
     if (m_first != 0) {
-	if (m_first->ptrs[mype] != ptr) {
-	    for (p=m_first, n=p->next; n != 0; p=n, n=n->next) {
-		if (n->ptrs[mype] == ptr) {
-		    *prev = p;
-		    return n;
-		}
-	    }
-	}
-	else {
-	    *prev = 0;
-	    return m_first;
-	}
+        if (m_first->ptrs[mype] != ptr) {
+            for (p=m_first, n=p->next; n != 0; p=n, n=n->next) {
+                if (n->ptrs[mype] == ptr) {
+                   *prev = p;
+                   return n;
+                }
+            }
+        }
+        else {
+            *prev = 0;
+            return m_first;
+        }
     }
     else {
-	*prev = 0;
-	return 0;
+        *prev = 0;
+        return 0;
     }
     
     ARMCI_Error("Cannot find pointer in linked list", -1);
@@ -62,8 +62,8 @@ struct mnode_t *mfind(void* ptr, struct mnode_t** prev) {
 void* munlink(struct mnode_t *node, struct mnode_t *prev) {
 
     if (node != 0) {
-	if (prev != 0) prev->next = node->next;
-	else m_first = node->next;
+        if (prev != 0) prev->next = node->next;
+        else m_first = node->next;
     }
 
     return node;
@@ -75,7 +75,7 @@ void* armci_malloc(int nbytes) {
     struct mnode_t *node = malloc(sizeof(struct mnode_t));
 
     if (node == 0) {
-	ARMCI_Error("Cannot allocate memory", -1);
+        ARMCI_Error("Cannot allocate memory", -1);
     }
 
     ARMCI_Malloc(node->ptrs, nbytes);
@@ -104,10 +104,10 @@ void* remote_ptr(void* local) {
 
     n = mfind(local, &p);  /* ignore p */
     if (n != 0) {
-	return n->ptrs[1-mype];
+        return n->ptrs[1-mype];
     }
     else {
-	return 0;
+        return 0;
     }
 }
 
@@ -129,21 +129,21 @@ int is_host_local(char* hostname)
     switch(h_errno)
       {
       case HOST_NOT_FOUND:
-	printf("host not found\n");
-	break;
-	
+        printf("host not found\n");
+        break;
+
       case NO_ADDRESS:
-	printf("no IP address available\n");
-	break;
-	
+        printf("no IP address available\n");
+        break;
+
       case NO_RECOVERY:
-	printf("name server error\n");
-	break;
-	
+        printf("name server error\n");
+        break;
+
       case TRY_AGAIN:
-	printf("temporary error on name server, try again later\n");
-	break;
-	
+        printf("temporary error on name server, try again later\n");
+        break;
+
       }
 
     return -1;
@@ -191,7 +191,7 @@ void set_armci_hostname()
     if(is_host_local(buf)==1) {
       fprintf(stderr,"Setting ARMCI_HOSTNAME=%s\n", buf);
       if(setenv("ARMCI_HOSTNAME", buf, 1)==-1)
-	fprintf(stderr, "Insufficient space in environment\n");
+      fprintf(stderr, "Insufficient space in environment\n");
     }
   }
 
@@ -199,12 +199,12 @@ void set_armci_hostname()
 
 }
 
-int Init(ArgStruct *p, int* pargc, char*** pargv)
+void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
     MPI_Init(pargc, pargv);
 }
 
-int Setup(ArgStruct *p) {
+void Setup(ArgStruct *p) {
     int e;
 
     set_armci_hostname(); /* aro */
@@ -212,37 +212,37 @@ int Setup(ArgStruct *p) {
 
     e = MPI_Comm_size(MPI_COMM_WORLD, &npes);
     if (e != MPI_SUCCESS) {
-	ARMCI_Error("Cannot obtain number of PEs", e);
+        ARMCI_Error("Cannot obtain number of PEs", e);
     }
     else if (npes != 2) {
-	ARMCI_Error("This program must be run on 2 PEs", -1);
+        ARMCI_Error("This program must be run on 2 PEs", -1);
     }
 
     e = MPI_Comm_rank(MPI_COMM_WORLD, &mype);
     if (e != MPI_SUCCESS) {
-	ARMCI_Error("Cannot obtain PE rank", e);
+        ARMCI_Error("Cannot obtain PE rank", e);
     }
 
     if (npes != 2) {
-	ARMCI_Error("You must run on 2 nodes", -1);
-	/* ARMCI_Error terminates everything */
+        ARMCI_Error("You must run on 2 nodes", -1);
+        /* ARMCI_Error terminates everything */
     }
 
     p->prot.flag = armci_malloc(sizeof(int));
     pTime = armci_malloc(sizeof(double));
     pNrepeat = armci_malloc(sizeof(int));
 
+    p->tr = p->rcv = 0;
     if ((p->prot.ipe = mype) == 0) {
-	p->tr = 1;
-	p->prot.nbor = 1;
-	*p->prot.flag = 1;
+        p->tr = 1;
+        p->prot.nbor = 1;
+        *p->prot.flag = 1;
     }
     else {
-	p->tr = 0;
-	p->prot.nbor = 0;
-	*p->prot.flag = 0;
+        p->rcv = 1;
+        p->prot.nbor = 0;
+        *p->prot.flag = 0;
     }
-    return 0;
 }
 
 
@@ -262,26 +262,22 @@ void SendData(ArgStruct *p) {
 
     p_bytes = p->bufflen;
 
-    if(buf_orig != NULL) {
-      buf_offset = p->buff - buf_orig;
-      remote_buff = remote_ptr(buf_orig) + buf_offset;
-    } else {
-      remote_buff = remote_ptr(p->buff);
-    }
+    buf_offset  = nbor_r_buff_offset;
+    buf_offset += p->s_ptr - p->s_buff;
+    remote_buff = remote_ptr(p->r_buff_orig) + buf_offset;
 
-    ARMCI_Put(p->buff, remote_buff, p_bytes, p->prot.nbor);
+    ARMCI_Put(p->s_ptr, remote_buff, p_bytes, p->prot.nbor);
     ARMCI_AllFence();  /* may be necessary or not */
 }
 
 
 void RecvData(ArgStruct *p) {
-    int i = 0;
 
-    while (p->buff[p->bufflen-1] != 'b'+p->prot.ipe) {
-	if ((++i % 10000000) == 0) printf(""); 
+    while (p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1)) {
+       if ((int)p % 2 == 3) printf(""); 
     }
 
-    p->buff[p->bufflen-1] = 'b' + p->prot.nbor; 
+    p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
 }
 
 
@@ -305,7 +301,7 @@ void RecvTime(ArgStruct *p, double *t) {
     int i = 0;
 
     while (*p->prot.flag != p->prot.ipe) {
-	if ((++i % 10000000) == 0) printf("");
+       if ((++i % 10000000) == 0) printf("");
     }
 
     *t = *pTime; 
@@ -343,29 +339,59 @@ void RecvRepeat(ArgStruct *p, int *rpt) {
 }
 
 
-int  CleanUp(ArgStruct *p) {
+void  CleanUp(ArgStruct *p) {
     ARMCI_Finalize();
-    return 0;
+
 }
 
 
 void FreeBuff(char *buff1, char* buff2) {
+
+  if(buff1 != NULL)
     armci_free(buff1);
+
+  if(buff2 != NULL)
     armci_free(buff2);
 }
 
 
-int MyMalloc(ArgStruct *p, int bufflen) {
+void MyMalloc(ArgStruct *p, int bufflen) {
 
-    p->buff = armci_malloc(bufflen);
-    p->buff[bufflen-1] = 'b' + p->tr;
+    p->r_buff = armci_malloc(bufflen);
+    
+    if(!p->cache)
+      p->s_buff = armci_malloc(bufflen);
 
-    p->buff1 = armci_malloc(bufflen);
-
-    return 0;
 }
 
 void Reset(ArgStruct *p)
 {
 
+}
+
+void InitBufferData(ArgStruct *p, int nbytes)
+{
+  memset(p->r_buff, 'a', nbytes);
+
+  if(p->cache)
+    p->r_buff[p->bufflen-1] = 'a' + p->tr;
+
+  if(!p->cache)
+    memset(p->s_buff, 'b', nbytes);
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+  MPI_Status s;
+
+  /* Calculate difference between malloc'ed buffer and aligned buffer */
+
+  int my_r_buff_offset = p->r_buff - p->r_buff_orig;
+
+  /* Exchange offset data */
+
+  MPI_Send(&my_r_buff_offset, 1, MPI_INT, p->prot.nbor, 0, MPI_COMM_WORLD);
+
+  MPI_Recv(&nbor_r_buff_offset, 1, MPI_INT, p->prot.nbor,0,MPI_COMM_WORLD, &s);
+  
 }

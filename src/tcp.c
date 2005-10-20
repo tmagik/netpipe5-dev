@@ -17,15 +17,20 @@
 #include "mplite.h"
 #endif
 
-int Init(ArgStruct *p, int* pargc, char*** pargv)
-{
+int doing_reset = 0;
 
+void Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+   p->reset_conn = 0; /* Default to not resetting connection */
+   p->prot.sndbufsz = p->prot.rcvbufsz = 0;
+   p->tr = 0;     /* The transmitter will be set using the -h host flag. */
+   p->rcv = 1;
 }
 
-int Setup(ArgStruct *p)
+void Setup(ArgStruct *p)
 {
 
- int tr, one = 1;                 /* tr==1 if process is a transmitter */
+ int one = 1;
  int sockfd;
  struct sockaddr_in *lsin1, *lsin2;      /* ptr to sockaddr_in in ArgStruct */
  char *host;
@@ -35,7 +40,6 @@ int Setup(ArgStruct *p)
 
 
  host = p->host;                           /* copy ptr to hostname */ 
- tr = p->tr;                               /* copy tr indicator */
 
 
  lsin1 = &(p->prot.sin1);
@@ -54,20 +58,18 @@ int Setup(ArgStruct *p)
    exit(555);
  }
 
- /* Attempt to set TCP_NODELAY */
+    /* Attempt to set TCP_NODELAY */
+
  if(setsockopt(sockfd, proto->p_proto, TCP_NODELAY, &one, sizeof(one)) < 0)
  {
    printf("NetPIPE: setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
    exit(556);
  }
 
- /* If possible, set the TCP buffers to 256 kB ( 512 kB Linux) */
- p->prot.sndbufsz = p->prot.rcvbufsz = 256000;
+   /* If requested, set the send and receive buffer sizes */
 
- /* If requested, set the send and receive buffer sizes */
  if(p->prot.sndbufsz > 0)
  {
-/*      printf("Send and Receive buffers set to %d bytes\n", p->prot.sndbufsz);*/
      if(setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
      {
@@ -85,13 +87,14 @@ int Setup(ArgStruct *p)
                  (char *) &send_size, (void *) &sizeofint);
  getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF,
                  (char *) &recv_size, (void *) &sizeofint);
- fprintf(stderr,"Send and receive buffers are %d and %d bytes\n",
-         send_size, recv_size);
- fprintf(stderr, "(A bug in Linux doubles the requested buffer sizes)\n");
+ 
+ if(!doing_reset) {
+   fprintf(stderr,"Send and receive buffers are %d and %d bytes\n",
+           send_size, recv_size);
+   fprintf(stderr, "(A bug in Linux doubles the requested buffer sizes)\n");
+ }
 
-
-
- if (tr){                                  /* if client i.e., Sender */
+ if (p->tr) {                                 /* if client i.e., Sender */
 
 
    if (atoi(host) > 0) {                   /* Numerical IP address */
@@ -111,7 +114,7 @@ int Setup(ArgStruct *p)
 
    lsin1->sin_port = htons(p->port);
 
- } else {                                 /* we are the receiver (server) */
+ } else if( p->rcv ) {                      /* we are the receiver (server) */
    
    bzero((char *) lsin1, sizeof(*lsin1));
    lsin1->sin_family      = AF_INET;
@@ -125,16 +128,14 @@ int Setup(ArgStruct *p)
 
  }
 
- if(tr)
+ if( p->tr )
    p->commfd = sockfd;
- else
+ else if( p->rcv )
    p->servicefd = sockfd;
 
  /* Establish connections */
  establish(p);
 
- return(0);
- 
 }   
 
 static int
@@ -145,40 +146,39 @@ readFully(int fd, void *obuf, int len)
   int bytesRead = 0;
 
   while (bytesLeft > 0 &&
-	 (bytesRead = read(fd, (void *) buf, bytesLeft)) > 0)
+         (bytesRead = read(fd, (void *) buf, bytesLeft)) > 0)
     {
       bytesLeft -= bytesRead;
       buf += bytesRead;
     }
-  if (bytesRead <= 0)
-    return bytesRead;
+  if (bytesRead <= 0) return bytesRead;
   return len;
 }
 
 void Sync(ArgStruct *p)
 {
     char s[] = "SyncMe";
-    char response[7];
+    char response[] = "      ";
 
-    if (write(p->commfd, s, strlen(s)) < 0 ||
-	readFully(p->commfd, response, strlen(s)) < 0)
+    if (write(p->commfd, s, strlen(s)) < 0 ||           /* Write to nbor */
+        readFully(p->commfd, response, strlen(s)) < 0)  /* Read from nbor */
       {
-	perror("NetPIPE: error writing or reading synchronization string");
-	exit(3);
+        perror("NetPIPE: error writing or reading synchronization string");
+        exit(3);
       }
     if (strncmp(s, response, strlen(s)))
       {
-	fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
-	exit(3);
+        fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
+        exit(3);
       }
 }
 
 void PrepareToReceive(ArgStruct *p)
 {
-	/*
-	  The Berkeley sockets interface doesn't have a method to pre-post
-	  a buffer for reception of data.
-	*/
+        /*
+            The Berkeley sockets interface doesn't have a method to pre-post
+            a buffer for reception of data.
+        */
 }
 
 void SendData(ArgStruct *p)
@@ -188,17 +188,17 @@ void SendData(ArgStruct *p)
 
     bytesLeft = p->bufflen;
     bytesWritten = 0;
-    q = p->buff;
+    q = p->s_ptr;
     while (bytesLeft > 0 &&
-	   (bytesWritten = write(p->commfd, q, bytesLeft)) > 0)
+           (bytesWritten = write(p->commfd, q, bytesLeft)) > 0)
       {
-	bytesLeft -= bytesWritten;
-	q += bytesWritten;
+        bytesLeft -= bytesWritten;
+        q += bytesWritten;
       }
     if (bytesWritten == -1)
       {
-	printf("NetPIPE: write: error encountered, errno=%d\n", errno);
-	exit(401);
+        printf("NetPIPE: write: error encountered, errno=%d\n", errno);
+        exit(401);
       }
 }
 
@@ -210,21 +210,21 @@ void RecvData(ArgStruct *p)
 
     bytesLeft = p->bufflen;
     bytesRead = 0;
-    q = p->buff;
+    q = p->r_ptr;
     while (bytesLeft > 0 &&
-	   (bytesRead = read(p->commfd, q, bytesLeft)) > 0)
+           (bytesRead = read(p->commfd, q, bytesLeft)) > 0)
       {
-	bytesLeft -= bytesRead;
-	q += bytesRead;
+        bytesLeft -= bytesRead;
+        q += bytesRead;
       }
     if (bytesLeft > 0 && bytesRead == 0)
       {
-	printf("NetPIPE: \"end of file\" encountered on reading from socket\n");
+        printf("NetPIPE: \"end of file\" encountered on reading from socket\n");
       }
     else if (bytesRead == -1)
       {
-	printf("NetPIPE: read: error encountered, errno=%d\n", errno);
-	exit(401);
+        printf("NetPIPE: read: error encountered, errno=%d\n", errno);
+        exit(401);
       }
 }
 
@@ -233,17 +233,17 @@ void SendTime(ArgStruct *p, double *t)
     unsigned long ltime, ntime;
 
     /*
-      Multiply the number of seconds by 1e6 to get time in microseconds
+      Multiply the number of seconds by 1e8 to get time in 0.01 microseconds
       and convert value to an unsigned 32-bit integer.
       */
-    ltime = (unsigned long)(*t * 1.e6);
+    ltime = (unsigned long)(*t * 1.e8);
 
     /* Send time in network order */
     ntime = htonl(ltime);
     if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
       {
-	printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
-	exit(301);
+        printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
+        exit(301);
       }
 }
 
@@ -255,19 +255,20 @@ void RecvTime(ArgStruct *p, double *t)
     bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
     if (bytesRead < 0)
       {
-	printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
-	exit(302);
+        printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
+        exit(302);
       }
     else if (bytesRead != sizeof(unsigned long))
       {
-	fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
-		bytesRead);
-	exit(303);
+        fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
+                bytesRead);
+        exit(303);
       }
     ltime = ntohl(ntime);
 
-    /* Result is ltime (in microseconds) divided by 1.0e6 to get seconds */
-    *t = (double)ltime / 1.0e6;
+        /* Result is ltime (in microseconds) divided by 1.0e8 to get seconds */
+
+    *t = (double)ltime / 1.0e8;
 }
 
 void SendRepeat(ArgStruct *p, int rpt)
@@ -298,7 +299,7 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   else if (bytesRead != sizeof(unsigned long))
     {
       fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
-	      bytesRead);
+              bytesRead);
       exit(306);
     }
   lrpt = ntohl(nrpt);
@@ -308,23 +309,21 @@ void RecvRepeat(ArgStruct *p, int *rpt)
 
 int establish(ArgStruct *p)
 {
- int clen;
- int one = 1;
- struct protoent *proto;
+  int clen, one = 1;
+  struct protoent *proto;
 
- clen = sizeof(p->prot.sin2);
- if(p->tr){
-   if(connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
-	      sizeof(p->prot.sin1)) < 0){
-     printf("Client: Cannot Connect! errno=%d\n",errno);
-     exit(-10);
-   }
-  }
-  else {
+  clen = sizeof(p->prot.sin2);
+  if(p->tr){
+    if(connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
+               sizeof(p->prot.sin1)) < 0){
+      printf("Client: Cannot Connect! errno=%d\n",errno);
+      exit(-10);
+    }
+  } else if( p->rcv ) {
     /* SERVER */
     listen(p->servicefd, 5);
     p->commfd = accept(p->servicefd, (struct sockaddr *) &(p->prot.sin2),
-		       &clen);
+                       &clen);
 
     if(p->commfd < 0){
       printf("Server: Accept Failed! errno=%d\n",errno);
@@ -341,7 +340,7 @@ int establish(ArgStruct *p)
     }
 
     if(setsockopt(p->commfd, proto->p_proto, TCP_NODELAY,
-		  &one, sizeof(one)) < 0)
+                  &one, sizeof(one)) < 0)
     {
       printf("setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
       exit(556);
@@ -351,66 +350,106 @@ int establish(ArgStruct *p)
     if(p->prot.sndbufsz > 0)
     {
 /*      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",*/
-/*	     p->prot.sndbufsz);*/
+/*           p->prot.sndbufsz);*/
       if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
       {
-	printf("setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
-	exit(556);
+        printf("setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
+        exit(556);
       }
       if(setsockopt(p->commfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
                                        sizeof(p->prot.rcvbufsz)) < 0)
       {
-	printf("setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
-	exit(556);
+        printf("setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
+        exit(556);
       }
     }
   } 
-  return 0;    /* Damn SGI compilers want this */
 }
 
-int  CleanUp(ArgStruct *p)
+void CleanUp(ArgStruct *p)
 {
    char *quit="QUIT";
-   if (p->tr)
-   {
+
+   if (p->tr) {
+
       write(p->commfd,quit, 5);
       read(p->commfd, quit, 5);
       close(p->commfd);
-   }
-   else
-   {
+
+   } else if( p->rcv ) {
+
       read(p->commfd,quit, 5);
       write(p->commfd,quit,5);
       close(p->commfd);
       close(p->servicefd);
+
    }
-   return 0;    /* Damn SGI compilers want this */
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
-   free(buff1);
-   free(buff2);
+  if(buff1 != NULL)
+
+    free(buff1);
+
+
+  if(buff2 != NULL)
+
+    free(buff2);
 }
 
-int MyMalloc(ArgStruct *p, int bufflen)
+void MyMalloc(ArgStruct *p, int bufflen)
 {
-    int rc;
-    if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+    /* Allocate receive buffer */
+
+    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
     {
-        fprintf(stderr,"couldn't allocate memory\n");
-        return -1;
+        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+        exit(-1);
     }
-    if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
+
+    /* Allocate send buffer */
+
+    if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
     {
-        fprintf(stderr,"Couldn't allocate memory\n");
-        return -1;
+        fprintf(stderr,"Couldn't allocate memory for send buffer\n");
+        exit(-1);
     }
-    return 0;
+
+    /* Save original buffer addresses in case we do alignment */
+
+    p->r_buff_orig = p->r_buff;
+    p->s_buff_orig = p->s_buff;
 }
 
 void Reset(ArgStruct *p)
+{
+  
+  /* Reset sockets */
+
+  if(p->reset_conn) {
+
+    doing_reset = 1;
+
+    /* Close the sockets */
+
+    CleanUp(p);
+
+    /* Now open and connect new sockets */
+
+    Setup(p);
+
+  }
+
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+
+}
+
+void InitBufferData(ArgStruct *p, int nbytes)
 {
 
 }
