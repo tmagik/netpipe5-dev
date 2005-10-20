@@ -4,6 +4,11 @@ extern struct gm_port *gm_p;
 extern unsigned long *ltime, *lrpt;
 extern char *sync, *sync1;
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+
+}
+
 int Setup(ArgStruct *p)
 {
   char * host;
@@ -25,6 +30,8 @@ int Setup(ArgStruct *p)
   sync  = gm_dma_malloc(gm_p, 64); 
   sync1 = gm_dma_malloc(gm_p, 64);
   sprintf(sync, "Syncme");   
+
+  establish(p);
 }   
 
 void my_send_callback (struct gm_port *port, void *context, gm_status_t status)
@@ -40,7 +47,7 @@ void my_send_callback (struct gm_port *port, void *context, gm_status_t status)
 }
 
 
-int Establish(ArgStruct *p)
+int establish(ArgStruct *p)
 {
   gm_recv_event_t *e;
   int bytesRead, recv_sz;
@@ -220,4 +227,9 @@ void FreeBuff(char *buff1, char *buff2)
 {
   gm_dma_free(gm_p, buff1);
   gm_dma_free(gm_p, buff2);
+}
+
+void Reset(ArgStruct *p)
+{
+
 }

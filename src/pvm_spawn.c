@@ -15,6 +15,11 @@
 
 extern int mytid;
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+
+}
+
 int Setup(ArgStruct *p)
 {
     int parent_tid;
@@ -107,14 +112,13 @@ void RecvRepeat(ArgStruct *p, int *nrepeat)
 }
 
 
-int Establish(ArgStruct *p)
-{
-}
-
 int  CleanUp(ArgStruct *p)
 {
 /*        pvm_lvgroup("netpipe"); */
         pvm_exit();
 }
 
+void Reset(ArgStruct *p)
+{
 
+}

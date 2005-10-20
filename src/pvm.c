@@ -15,8 +15,19 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "$Id: pvm.c,v 1.1.1.1 2002/09/03 21:16:29 turner Exp $";
+    "$Id: pvm.c,v 1.3 2002/11/13 00:25:04 adoline Exp $";
 #endif
+
+
+/**********************************************************************/
+/* Initialialization that needs to occur before                       */
+/* command args are parsed                                            */
+/**********************************************************************/
+int 
+Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+
+}
 
 /**********************************************************************/
 /* Set up the communcations system.                                   */
@@ -29,6 +40,8 @@ Setup(ArgStruct *p)
 #ifdef DEBUG
     printf("My task id is %d \n",p->prot.mytid);
 #endif
+
+    establish(p);
 }   
 
 /**********************************************************************/
@@ -39,7 +52,7 @@ Setup(ArgStruct *p)
 /*    the other task id is.                                           */
 /**********************************************************************/
 int
-Establish(ArgStruct *p)
+establish(ArgStruct *p)
 {
     /* Task information for the entire parallel machine (if trans) */
     int                     tasks_status;
@@ -236,3 +249,7 @@ int MyMalloc(ArgStruct *p, int bufflen)
     return 0;
 }
 
+void Reset(ArgStruct *p)
+{
+
+}

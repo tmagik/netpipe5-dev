@@ -1,7 +1,7 @@
 
   For more complete information on NetPIPE, visit the webpage at:
 
-http://www.scl.ameslab.gov/Projects/NetPIPE/
+http://www.scl.ameslab.gov/Projects/Netpipe/
 
 NetPIPE was originally developed by Quinn Snell, Armin Mikler,
 John Gustafson, and Guy Helmer.
@@ -13,7 +13,8 @@ The latest release, version 3.2, includes additional modules to test
 PVM, TCGMSG, SHMEM, and MPI-2, as well as the GM, GPSHMEM, ARMCI, and LAPI
 software layers they run upon.  
 
-In the future, we would like to add VIA and Infinaband modules.
+Release 3.3 includes an Infiniband module for the Mellanox VAPI.
+It also has an integrity check (-i), which is still being developed.
 
 If you have problems or comments, please email netpipe@scl.ameslab.gov
 
@@ -56,6 +57,7 @@ Compile NetPIPE with the desired communication interface by using:
   make gpshmem    (SHMEM interface for other machines)
   make armci      (still under development)
   make lapi       (for the IBM SP)
+  make ib         (for Mellanox Infiniband adapters, uses VAPI layer)
 
 Running NetPIPE
 ---------------
@@ -208,6 +210,25 @@ NetPIPE is run, and are in order of their general usefulness.
       If running on interfaces other than the default, create a file
         called armci_hosts, containing two lines, one for each hostname,
 	then run package. 
+
+   Infiniband
+   ----------
+
+      This test will only work on machines connected via TCP/IP as well
+        as Infiniband.
+      Install Mellanox Infiniband adapters and software
+      Make sure the adapters are up and running (e.g. Check that the 
+        Mellanox-supplied bandwidth/latency program, perf_main, works, if 
+        you have it).
+      Compile NetPIPE using 'make ib' (The environment variable MTHOME needs
+        to be set to the directory containing the include and lib directories
+        for the Mellanox software).
+      other_host> NPib -r
+      local_host> NPib -t -h other_host
+      (other_host should be the ip address or dns name of the other host)
+        
+      Other options:  add -B switch to both other and local host command
+        lines to prepost all receives before each timed run commences.
 
 Interpreting the Results
 ------------------------

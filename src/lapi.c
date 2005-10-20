@@ -10,6 +10,12 @@ extern void           *tgt_addr[2];
 extern void           *rpt_addr[2];
 extern void           *time_addr[2];
 extern int            *pRepeat;
+
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+
+}
+
 int Setup(ArgStruct *p)
 {
         int tr, one=1;
@@ -127,11 +133,6 @@ void RecvTime(ArgStruct *p, double *t)
         rc = LAPI_Waitcntr(t_hndl, &t_cntr, 1, &cur_val);
 }
 
-int Establish(ArgStruct *p)
-{
-	return 0;
-}
-
 void SendRepeat(ArgStruct *p, int rpt)
 {
         int rc;
@@ -187,4 +188,9 @@ int MyMalloc(ArgStruct *p, int bufflen)
     }
     rc = LAPI_Address_init(t_hndl,p->buff1,global_addr);
     return 0;
+}
+
+void Reset(ArgStruct *p)
+{
+
 }

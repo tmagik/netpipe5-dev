@@ -3,6 +3,11 @@
 extern double *pTime;
 extern int    *pNrepeat;
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+
+}
+
 int Setup(ArgStruct *p)
 {
    int npes;
@@ -78,11 +83,6 @@ void RecvTime(ArgStruct *p, double *t)
    *p->prot.flag=p->prot.nbor;
 }
 
-int Establish(ArgStruct *p)
-{
-        return 0;
-}
-
 void SendRepeat(ArgStruct *p, int rpt)
 {
    *pNrepeat= rpt;
@@ -127,4 +127,9 @@ int MyMalloc(ArgStruct *p, int bufflen)
       return -1;
    }
    return 0;
+}
+
+void Reset(ArgStruct *p)
+{
+
 }

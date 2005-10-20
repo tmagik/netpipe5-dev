@@ -3,6 +3,11 @@
 extern double *pTime;
 extern int    *pNrepeat;
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+   gpshmem_init(pargc, pargv);
+}
+
 int Setup(ArgStruct *p)
 {
    int npes;
@@ -41,7 +46,7 @@ void PrepareToReceive(ArgStruct *p) { }
 void SendData(ArgStruct *p)
 {
    if(p->bufflen%4==0)
-      gpshmem_put32(p->buff,p->buff,p->bufflen/4,p->prot.nbor);
+      gpshmem_put32((short*)p->buff,(short*)p->buff,p->bufflen/4,p->prot.nbor);
    else
       gpshmem_putmem(p->buff,p->buff,p->bufflen,p->prot.nbor);
 }
@@ -79,54 +84,28 @@ void RecvTime(ArgStruct *p, double *t)
    *p->prot.flag=p->prot.nbor;
 }
 
-int Establish(ArgStruct *p)
-{
-   return 0;
-}
-
 void SendRepeat(ArgStruct *p, int rpt)
 {
-printf("%d in SendRepeat()\n",p->prot.ipe); fflush(stdout);
-printf("%d: %d %p\n",p->prot.ipe, *p->prot.flag, p->prot.flag); fflush(stdout);
-/*
-*/
-
    *pNrepeat= rpt;
 
    gpshmem_putmem(pNrepeat,pNrepeat,sizeof(int),p->prot.nbor);
 
    gpshmem_putmem(p->prot.flag,p->prot.flag,sizeof(int),p->prot.nbor);
 
-printf("%d leaving SendRepeat()\n",p->prot.ipe); fflush(stdout);
-/*
-*/
 }
 
 void RecvRepeat(ArgStruct *p, int *rpt)
 {
    int i=0;
 
-printf("%d in RecvRepeat()\n",p->prot.ipe); fflush(stdout);
-printf("%d: %d %p\n",p->prot.ipe, *p->prot.flag, p->prot.flag); fflush(stdout);
-sleep(1);
-/*
-*/
    while( *p->prot.flag != p->prot.ipe ) {
 
       if( ++i%2 == 3 ) printf("%d", *p->prot.flag);  /* invalidate cache */
-      if( i%10000 == 9999 ) {
-printf("%d: %d %p\n",p->prot.ipe, *p->prot.flag, p->prot.flag); fflush(stdout);
-         sleep(1);
-      }
-/*
-*/
+
    }
    *rpt=*pNrepeat;
    *p->prot.flag=p->prot.nbor;
-printf("\n%d: %d %p\n",p->prot.ipe, *p->prot.flag, p->prot.flag); fflush(stdout);
-printf("%d leaving RecvRepeat()\n",p->prot.ipe); fflush(stdout);
-/*
-*/
+
 }
 
 int  CleanUp(ArgStruct *p)
@@ -155,4 +134,9 @@ int MyMalloc(ArgStruct *p, int bufflen)
       return -1;
    }
    return 0;
+}
+
+void Reset(ArgStruct *p)
+{
+
 }

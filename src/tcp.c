@@ -17,6 +17,11 @@
 #include "mplite.h"
 #endif
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+
+}
+
 int Setup(ArgStruct *p)
 {
 
@@ -55,6 +60,9 @@ int Setup(ArgStruct *p)
    printf("NetPIPE: setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
    exit(556);
  }
+
+ /* If possible, set the TCP buffers to 256 kB ( 512 kB Linux) */
+ p->prot.sndbufsz = p->prot.rcvbufsz = 256000;
 
  /* If requested, set the send and receive buffer sizes */
  if(p->prot.sndbufsz > 0)
@@ -121,6 +129,9 @@ int Setup(ArgStruct *p)
    p->commfd = sockfd;
  else
    p->servicefd = sockfd;
+
+ /* Establish connections */
+ establish(p);
 
  return(0);
  
@@ -295,7 +306,7 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   *rpt = lrpt;
 }
 
-int Establish(ArgStruct *p)
+int establish(ArgStruct *p)
 {
  int clen;
  int one = 1;
@@ -399,3 +410,7 @@ int MyMalloc(ArgStruct *p, int bufflen)
     return 0;
 }
 
+void Reset(ArgStruct *p)
+{
+
+}

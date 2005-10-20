@@ -19,8 +19,13 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/time.h>       /* struct timeval */
+#include <sys/resource.h>   /* getrusage() */
+//#include <unistd.h>         /* getrusage() */
 #include <stdlib.h>         /* malloc(3) */
 
+#ifdef INFINIBAND
+#include <ib_defs.h> /* ib_mtu_t */
+#endif
 
 #ifdef FINAL
   #define  TRIALS             7
@@ -64,6 +69,9 @@
       struct hostent          *addr;    /* Address of host                */
       int                     sndbufsz, /* Size of TCP send buffer        */
                               rcvbufsz; /* Size of TCP receive buffer     */
+#if defined(INFINIBAND)
+      IB_mtu_t                ib_mtu;   /* MTU Size for Infiniband HCA    */
+#endif
   };
 
 #elif defined(MPI)
@@ -214,6 +222,8 @@ struct data
 
 double When();
 
+int Init(ArgStruct *p, int* argc, char*** argv);
+
 int Setup(ArgStruct *p);
 
 void Sync(ArgStruct *p);
@@ -232,14 +242,18 @@ void SendRepeat(ArgStruct *p, int rpt);
 
 void RecvRepeat(ArgStruct *p, int *rpt);
 
-int Establish(ArgStruct *p);
-
 void FreeBuff(char *buff1, char *buff2);
 
 int  CleanUp(ArgStruct *p);
 
 int MyMalloc(ArgStruct *p, int bufflen);
 
+void Reset(ArgStruct *p);
+
 void mymemset(int *ptr, int c, int n);
 
 void flushcache(int *ptr, int n);
+
+void SetIntegrityData(ArgStruct *p);
+
+int VerifyIntegrity(ArgStruct *p);

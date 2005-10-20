@@ -199,9 +199,14 @@ void set_armci_hostname()
 
 }
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+    MPI_Init(pargc, pargv);
+}
+
 int Setup(ArgStruct *p) {
     int e;
-    
+
     set_armci_hostname(); /* aro */
     ARMCI_Init(); /* aro */
 
@@ -308,11 +313,6 @@ void RecvTime(ArgStruct *p, double *t) {
 }
 
 
-int Establish(ArgStruct *p) {
-    return 0;
-}
-
-
 void SendRepeat(ArgStruct *p, int rpt) {
     void *remote_buff;
     int p_bytes;
@@ -363,4 +363,9 @@ int MyMalloc(ArgStruct *p, int bufflen) {
     p->buff1 = armci_malloc(bufflen);
 
     return 0;
+}
+
+void Reset(ArgStruct *p)
+{
+
 }

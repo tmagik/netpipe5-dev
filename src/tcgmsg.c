@@ -17,6 +17,11 @@
 void RCV_(long *type, void *buf, long *lenbuf, long *lenmes, long *nodesel, long *nodefrom, long *sync);
 void SND_(long *type, void *buf, long *lenbuf, long *node, long *sync);
 
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+    PBEGIN_(*pargc, *pargv);
+}
+
 int Setup(ArgStruct *p)
 {
     long nprocs;
@@ -127,10 +132,6 @@ void RecvRepeat(ArgStruct *p, int *n)
    RCV_( &ttype, n, &lenbuf, &lenmes, &p->prot.nbor, &nodefrom, &sync_rcv);
 }
 
-int Establish(ArgStruct *p)
-{
-}
-
 int  CleanUp(ArgStruct *p)
 {
         PEND_();
@@ -158,3 +159,7 @@ int MyMalloc(ArgStruct *p, int bufflen)
     return 0;
 }
 
+void Reset(ArgStruct *p)
+{
+
+}

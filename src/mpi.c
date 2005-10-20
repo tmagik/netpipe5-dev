@@ -18,6 +18,13 @@ char *messbuff;
 #define MAXBUFSIZE (10*1024*1024)
 #endif
 
+/* Initialize vars in Init() that may be changed by parsing the command args */
+int Init(ArgStruct *p, int* pargc, char*** pargv)
+{
+  p->source_node = 0;  /* Default source node */
+
+  MPI_Init(pargc, pargv);
+}
 
 int Setup(ArgStruct *p)
 {
@@ -151,12 +158,6 @@ void RecvRepeat(ArgStruct *p, int *rpt)
     MPI_Recv(rpt, 1, MPI_INT, p->source_node, 2, MPI_COMM_WORLD, &status);
 }
 
-
-int Establish(ArgStruct *p)
-{
-   return 0;    /* Damn SGI compilers want this */
-}
-
 int  CleanUp(ArgStruct *p)
 {
    MPI_Finalize();
@@ -185,3 +186,7 @@ int MyMalloc(ArgStruct *p, int bufflen)
     return 0;
 }
 
+void Reset(ArgStruct *p)
+{
+
+}

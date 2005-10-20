@@ -20,31 +20,31 @@
 /*     * tcgmsg.h        ---- Include file for TCGMSG calls and data structs */
 /*****************************************************************************/
 
+#include <limits.h>
+
 #include "netpipe.h"
-#if defined(ARMCI) || defined(MPI)
-#include "mpi.h"
+
+#if defined(MPI2)
+#include "mpi.h" /* Included for MPI stuff used in cache-effects code */
 #endif
 
 #if defined(MPLITE)
-#include "mplite.h"
-#endif
-
-#ifdef TCGMSG
-#include <sndrcv.h>
-#endif
-
-#ifdef PVM
-    int         mytid;          /* the tid of the current process            */
+#include "mplite.h" /* Included for the malloc wrapper to protect from
+                       mallocs in sigio handler (very rare, may not occur?) */
 #endif
 
 extern char *optarg;
 
 #if defined(MPI2)
-extern MPI_Win win;
+extern MPI_Win win; /* Needed for cache-effects code */
 #endif
 
 #if defined(MPI2) || defined(ARMCI)
-extern char* buf_orig;
+extern char* buf_orig; /* Needed for cache-effects code */
+#endif
+
+#if defined(INFINIBAND)
+extern int ib_cache_effects;
 #endif
 
 main(int argc, char **argv)
@@ -52,18 +52,18 @@ main(int argc, char **argv)
     FILE        *out;           /* Output data file                          */
     char        s[255];         /* Generic string                            */
     char        *memtmp,        /* store buffers to be sent out              */
-                *memtmp_align;  /* after alignment                           */    
-    char        *memtmp1,       /* receive data to this part of memory       */ 
-                *memtmp1_align; /* after alignment                           */    
-    int         *memcache;      /* used to flush cache                       */  
+                *memtmp_align;  /* after alignment                           */
+    char        *memtmp1,       /* receive data to this part of memory       */
+                *memtmp1_align; /* after alignment                           */
+    int         *memcache;      /* used to flush cache                       */
     int         b_usecache = 0; /* 1, more cache effect                      */
                                 /* 0, little cache effect                    */
 
-    int         len_buf_align,  /* meaningful when b_usecache is 0. buflen   */ 
+    int         len_buf_align,  /* meaningful when b_usecache is 0. buflen   */
                                 /* rounded up to be divisible by 8           */
-                num_buf_align,  /* meaningful when b_usecache is 0. number   */ 
+                num_buf_align,  /* meaningful when b_usecache is 0. number   */
                                 /* of aligned buffers in memtmp              */
-                num1_buf_align; /* meaningful when b_usecache is 0. number   */ 
+                num1_buf_align; /* meaningful when b_usecache is 0. number   */
                                 /* of aligned buffers in memtmp1             */
 
     int         c,              /* option index                              */
@@ -80,9 +80,11 @@ main(int argc, char **argv)
                 pert,           /* Perturbation value                        */
                 start= 1,       /* Starting value for signature curve        */
                 end=MAXINT,     /* Ending value for signature curve          */
-                streamopt=0;    /* Streaming mode flag                       */
+                streamopt=0,    /* Streaming mode flag                       */
+                cputime=0,      /* CPU timing flag                           */
+                prepost_burst=0;/* Prepost burst flag                        */
    
-    ArgStruct   args;           /* Argumentsfor all the calls                */
+    ArgStruct   args;           /* Arguments for all the calls               */
 
     double      t, t0, t1, t2,  /* Time variables                            */
                 tlast,          /* Time for the last transmission            */
@@ -93,78 +95,50 @@ main(int argc, char **argv)
     short       port=DEFPORT;   /* Port number for connection                */
     int         onlyTwoComm=0;  /* If running on more than two nodes, only
                                    two nodes will actually communicate       */
-
-
-#ifdef MPI
-    MPI_Init(&argc, &argv);
-#ifdef MPI2
-    args.prot.use_get = 0;  /* Default to put   */
-    args.prot.no_fence = 0; /* Default to fence */
-#endif
-#endif
+    int         integCheck=0;   /* Integrity check                           */
+    int         integPass=0;    /* Number of times integrity check passes    */
 
 #ifdef ARMCI
-    MPI_Init(&argc, &argv);
     bufalign=0; /* changing buffer alignment throws off the list of pointers
                    to shared memory */
     fprintf(stderr, "Buffer alignment is off (Required for this module)\n");
 #endif
 
-#ifdef PVM
-    mytid = pvm_mytid();
-#endif
-
-#ifdef TCGMSG
-    PBEGIN_(argc, argv);
-#endif
-
 #ifdef LAPI
-    int      rc;                 /* the return value of LAPI calls           */
+    /* Make nrepeat part of ArgStruct if we want to remove this */
     pRepeat = &nrepeat;
 #endif
 
-#ifdef GPSHMEM
-    gpshmem_init(&argc, &argv);
-#endif
-
-    strcpy(s, "np.out");
-
-#ifndef MPI
-#ifndef ARMCI
-#ifndef PVM
-#ifndef TCGMSG
-#ifndef LAPI
-#ifndef SHMEM
+#if defined(TCP) || defined(GM) || defined(PVM) /* Others (LAPI, SHMEM) ? */
     if(argc < 2) PrintUsage();
 #endif
-#endif
-#endif
-#endif
-#endif
-#endif
 
-    args.source_node = 0;
+    /* Initialize vars that may change from default due to arguments */
 
-#if defined(TCP)
-    /* If possible, set the TCP buffers to 256 kB ( 512 kB Linux) */
-    args.prot.sndbufsz = args.prot.rcvbufsz = 256000;
-#endif
+    strcpy(s, "np.out");   /* Default output file */
 
-#if defined(TCGMSG)
+    /* Let modules initialize related vars, and possibly call a library init
+       function that requires argc and argv */
+
+    Init(&args, &argc, &argv);
+
     /* TCGMSG launches NPtcgmsg with a -master master_hostname
      * argument, so ignore all arguments and set them manually 
      * in netpipe.c instead.
      */
 
-    printf("Command line options are disabled for the TCGMSG module.\n");
-    printf("Edit modules/netpipe.c to set options manually if you want.\n");
-#else
+#if ! defined(TCGMSG)
 
     /* Parse the arguments. See Usage for description */
-    while ((c = getopt(argc, argv, "Pstzrgfh:p:o:A:O:l:u:i:b:a:c")) != -1)
+    while ((c = getopt(argc, argv, "IPstzrgfcCaBh:p:o:A:O:l:u:i:b:m:")) != -1)
     {
         switch(c)
         {
+            case 'B': prepost_burst = 1;
+                      printf("Preposting all receives before timed run\n");
+                      fflush(stdout);
+                      break;
+
             case 'c': b_usecache = 1;
                       break;
 
@@ -234,36 +208,74 @@ main(int argc, char **argv)
                       fflush(stdout);
                       break;
 
+            case 'I': integCheck = 1;
+                      printf("Doing integrity check\n");
+                      fflush(stdout);
+                      break;
+
 #if defined(MPI2)
-           case 'g': if(args.prot.no_fence == 1) {
-                         fprintf(stderr, "-g and -f cannot be used together\n");
-                         MPI_Finalize();
-                         exit(-1);
-                     }
-                     args.prot.use_get = 1;
-                     printf("Using MPI-2 Get instead of Put\n");
-                     break;
+            case 'g': if(args.prot.no_fence == 1) {
+                        fprintf(stderr, "-f cannot be used with -g\n");
+                        exit(-1);
+                      } 
+                      args.prot.use_get = 1;
+                      printf("Using MPI-2 Get instead of Put\n");
+                      break;
+
             case 'f': if(args.prot.use_get == 1) {
-                         fprintf(stderr, "-g and -f cannot be used together\n");
-                         MPI_Finalize();
+                         fprintf(stderr, "-f cannot be used with -g\n");
                          exit(-1);
-                     }
-                     args.prot.no_fence = 1;
-                     bufalign = 0;
-                     printf("Buffer alignment off (Required for no fence)\n");
-                     break;
-#endif      
+                      }
+                      args.prot.no_fence = 1;
+                      bufalign = 0;
+                      printf("Buffer alignment off (Required for no fence)\n");
+                      break;
+#endif /* MPI2 */
             case 'T': onlyTwoComm = 1;
                       printf("Only two nodes will communicate\n");
                       fflush(stdout);
                       break;
+
+#if defined(HAVE_GETRUSAGE)
+            case 'C': cputime = 1;
+                      printf("Tracking CPU usage\n");
+                      break;
+#endif
+
+#if defined(INFINIBAND)
+            case 'm': switch(atoi(optarg)) {
+                        case 256: args.prot.ib_mtu = MTU256;
+                          break;
+                        case 512: args.prot.ib_mtu = MTU512;
+                          break;
+                        case 1024: args.prot.ib_mtu = MTU1024;
+                          break;
+                        case 2048: args.prot.ib_mtu = MTU2048;
+                          break;
+                        case 4096: args.prot.ib_mtu = MTU4096;
+                          break;
+                        default: 
+                          fprintf(stderr, "Invalid MTU size, must be one of " \
+                                          "256, 512, 1024, 2048, 4096\n");
+                          exit(-1);
+                      }
+                      break;
+#endif
 
             default: 
                      PrintUsage(); 
                      exit(-12);
        }
    }
+
+#endif /* ! defined TCGMSG */
+
+#if defined(INFINIBAND)
+   ib_cache_effects = b_usecache;
+   asyncReceive = 1;
+   fprintf(stderr, "Preposting asynchronous receives (required for Infiniband)\n");
 #endif
+
    if (start > end)
    {
        fprintf(stderr, "Start MUST be LESS than end\n");
@@ -274,7 +286,6 @@ main(int argc, char **argv)
    args.port = port;
 
    Setup(&args);
-   Establish(&args);
 
    if (args.tr)
    {
@@ -303,6 +314,14 @@ main(int argc, char **argv)
           are setup by armci_malloc in armci.c */
        if ( ( (args.tr ? memtmp : memtmp1) = (char *)armci_malloc(MEMSIZE)) 
             == NULL)
+#elif defined(GPSHMEM)
+       if ( ( (args.tr ? memtmp : memtmp1) = (char *)gpshmalloc(MEMSIZE)) 
+            == NULL)
+#elif defined(INFINIBAND)
+       MyMalloc(&args, MEMSIZE);
+       memtmp  = args.buff;
+       memtmp1 = args.buff1;
+       if(0)
 #else
        if ( (memtmp = (char *)malloc(MEMSIZE)) == NULL)
 #endif
@@ -314,6 +333,11 @@ main(int argc, char **argv)
        /* Same as above, only reversed */
        if ( ( (args.tr ? memtmp1 : memtmp) = (char *)armci_malloc(MEMSIZE)) 
             == NULL)
+#elif defined(GPSHMEM)
+       if ( ( (args.tr ? memtmp1 : memtmp) = (char *)gpshmalloc(MEMSIZE))
+            == NULL)
+#elif defined(INFINIBAND)
+       if(0)
 #else
        if ( (memtmp1 =(char *)malloc(MEMSIZE)) == NULL)
 #endif
@@ -400,6 +424,8 @@ main(int argc, char **argv)
            if (args.tr)
                fprintf(stderr,"%3d: %7d bytes %6d times --> ",
                        n,args.bufflen,nrepeat);
+
+/* start cache stuff */
            if (b_usecache)
            {
                /* Allocate the buffer */
@@ -430,9 +456,9 @@ main(int argc, char **argv)
                /* 
                 * buffer length rouded up to be devisible by bufalign
                 */ 
-               len_buf_align = args.bufflen + bufalign;
+               len_buf_align = args.bufflen;
                if(bufalign != 0)
-                 len_buf_align -= (int)args.bufflen % bufalign;
+                 len_buf_align += bufalign - args.bufflen % bufalign;
  
                /* 
                 * number of buffers that have the same alignment in two
@@ -447,7 +473,7 @@ main(int argc, char **argv)
                   initialize the last byte of each block before we flush
                   the cache, since the initialization would normally take
                   place in MyMalloc */
-#if defined(MPI2) || defined(SHMEM) || defined(GPSHMEM) || defined(ARMCI)
+#if defined(MPI2) || defined(SHMEM) || defined(GPSHMEM) || defined(ARMCI) || defined(INFINIBAND)
                for (i = 0; i < num_buf_align; i++)
                *(memtmp_align  + i * len_buf_align 
                        + (args.bufflen -1)) = 'b' + args.tr;    
@@ -458,6 +484,7 @@ main(int argc, char **argv)
 #endif
                 flushcache(memcache, MEMSIZE/sizeof(int));  
             }
+/* end cache stuff */
 
 
 /* NOTE: The buffer alignment does not work on the Paragon for some 
@@ -465,6 +492,7 @@ main(int argc, char **argv)
  *        - Dave Turner
  */
 
+            integPass = 0;
 
             /* Finally, we get to transmit or receive and time */
 
@@ -478,15 +506,42 @@ main(int argc, char **argv)
 
                 bwdata[n].t = LONGTIME;
                 t2 = t1 = 0;
-                for (i = 0; i < TRIALS; i++)
+
+                if(cputime) CPUTime_Init();
+
+                for (i = 0; i < (integCheck ? 1 : TRIALS); i++)
                 {
                     Sync(&args);
+
+                    if(prepost_burst && asyncReceive && !streamopt)
+                    {
+                      for(j=0; j<nrepeat; j++) {
+
+                        if (!b_usecache)
+                          args.buff = memtmp1_align + 
+                            ((i * nrepeat + j) % num1_buf_align) * 
+                            len_buf_align;
+                        
+                        PrepareToReceive(&args);
+
+                      }
+                    }
+
+		    if(cputime) CPUTime_Start();
 
                     t0 = When();
                     for (j = 0; j < nrepeat; j++)
                     {
-                        if (asyncReceive && !streamopt)
+                        if (!prepost_burst && asyncReceive && !streamopt)
                         {
+                            if (!b_usecache)
+                            {
+                              args.buff = memtmp1_align + 
+                                ((i *nrepeat + j) % num1_buf_align) * 
+                                len_buf_align;
+
+                            }
+
                             PrepareToReceive(&args);
                         }
                         if (!b_usecache)
@@ -495,6 +550,8 @@ main(int argc, char **argv)
                             ((i * nrepeat + j) % num_buf_align) * 
                             len_buf_align;
                         }
+
+                        if (integCheck) SetIntegrityData(&args);
 
                         SendData(&args);
 
@@ -510,9 +567,17 @@ main(int argc, char **argv)
 
                             RecvData(&args);
 
+                            if (integCheck) integPass += VerifyIntegrity(&args);
                         }
                     }
                     t = (When() - t0)/((1 + !streamopt) * nrepeat);
+
+                    Reset(&args);
+
+                    /* CPUTime_Finish needs to know the number of repeats
+                       to divide total CPU usage by */
+
+                    if(cputime) CPUTime_Finish((1 + !streamopt) * nrepeat);
 
 /* NOTE: NetPIPE does each data point TRIALS times, bouncing the message
  * nrepeats times for each test, then reports the lowest of the TRIALS
@@ -533,6 +598,11 @@ main(int argc, char **argv)
                 if (!streamopt)
                     bwdata[n].variance = t2/TRIALS - t1/TRIALS * t1/TRIALS;
 
+                /* Calculate variance in cpu usage after completing this
+                   set of trials */
+
+                if(cputime) CPUTime_Variance();
+
             }
             else
             {
@@ -543,11 +613,32 @@ main(int argc, char **argv)
                 */
                 bwdata[n].t = LONGTIME;
                 t2 = t1 = 0;
-                for (i = 0; i < TRIALS; i++)
+                for (i = 0; i < (integCheck ? 1 : TRIALS); i++)
                 {
-                    if (asyncReceive)
+                    if (!prepost_burst && asyncReceive)
                     {
-                            PrepareToReceive(&args);
+                        if (!b_usecache)
+                        {
+                          args.buff = memtmp1_align + 
+                            ((i * nrepeat) % num1_buf_align) * 
+                            len_buf_align; 
+                        }
+
+                        PrepareToReceive(&args);
+                    }
+                    else if(prepost_burst && asyncReceive)
+                    {
+     
+                      for(j=0; j<nrepeat; j++) {
+                        if (!b_usecache)
+                          args.buff = memtmp1_align + 
+                            ((i * nrepeat + j) % num1_buf_align) * 
+                            len_buf_align; 
+
+                        PrepareToReceive(&args);
+
+                      }
+     
                     }
 
                     Sync(&args);
@@ -564,8 +655,17 @@ main(int argc, char **argv)
 
                         RecvData(&args);
 
-                        if (asyncReceive && (j < nrepeat - 1))
+                        if (integCheck) integPass += VerifyIntegrity(&args);
+                        
+                        if (!prepost_burst && asyncReceive && (j < nrepeat - 1))
                         {
+                            if (!b_usecache)
+                            {
+                                args.buff = memtmp1_align + 
+                                  ((i * nrepeat + (j+1)) % num1_buf_align) * 
+                                  len_buf_align; 
+                            }
+
                             PrepareToReceive(&args);
                         }
                         if (!streamopt)
@@ -577,13 +677,17 @@ main(int argc, char **argv)
                                 len_buf_align;
 
                             }
-
+                            
+                            if (integCheck) SetIntegrityData(&args);
+                            
                             SendData(&args);
 
                         }
                     }
                     t = (When() - t0)/((1 + !streamopt) * nrepeat);
 
+                    Reset(&args);
+                    
                     if (streamopt)
                     {
                         t2 += t*t;
@@ -608,8 +712,18 @@ main(int argc, char **argv)
             
             if (args.tr)
             {
-                fprintf(out,"%8d %lf %lf\n",
-                      bwdata[n].bits / 8, bwdata[n].bps, bwdata[n].t);
+                if(integCheck) {
+                  fprintf(out,"%8d %d %d %d", bwdata[n].bits / 8, nrepeat, integPass, 
+                          integPass==nrepeat);
+
+                } else {
+                  fprintf(out,"%8d %lf %lf",
+                        bwdata[n].bits / 8, bwdata[n].bps, bwdata[n].t);
+
+                  if(cputime) CPUTime_Output(out);
+                }
+
+                fprintf(out, "\n");
                 fflush(out);
             }
     
@@ -617,8 +731,18 @@ main(int argc, char **argv)
                 FreeBuff(memtmp, memtmp1);
             
             if (args.tr )
-              fprintf(stderr," %8.2lf Mbps in %10.2lf usec\n", 
-                              bwdata[n].bps, tlast*1.0e6);
+              if(integCheck) {
+                
+                if(integPass == nrepeat)
+                  fprintf(stderr, " Integrity check passed\n");
+                else
+                  fprintf(stderr, " Integrity check failed %d time(s)\n", 
+                          nrepeat-integPass);
+
+              } else {
+                fprintf(stderr," %8.2lf Mbps in %10.2lf usec\n", 
+                        bwdata[n].bps, tlast*1.0e6);
+              }
 
         } /* End of perturbation loop */
 
@@ -674,7 +798,41 @@ void flushcache(int *ptr, int n)
     
 }
  
-  
+
+/* For integrity check we set each successive byte to one more than the last, 
+ * modulo 256, starting at CHAR_MIN (limits.h) and going up to the maximum of 
+ * CHAR_MIN + [2^8 - 1 = 255].  Thus we test the integrity of every possible 
+ * combination of 8 bits.  For portability we start with CHAR_MIN because the 
+ * plain char may or may not be signed.
+ */
+void SetIntegrityData(ArgStruct *p)
+{
+  int i;
+
+  for(i=0; i<p->bufflen-1; i++) {
+
+    p->buff[i] = CHAR_MIN + (i % 256);
+
+  }
+}
+
+int VerifyIntegrity(ArgStruct *p)
+{
+  int i;
+  int integrityVerified = 1;
+
+  for(i=0; i<p->bufflen-1 && integrityVerified; i++) {
+
+    if( p->buff[i] != CHAR_MIN + (i % 256) ) {
+
+      integrityVerified = 0;
+
+    }
+
+  }
+
+  return integrityVerified;
+}  
     
 int PrintUsage()
 {
@@ -713,6 +871,9 @@ int PrintUsage()
 #endif
 
     printf("c: Allow cache effects <Default is to limit cache effects>\n");
+#if defined(HAVE_GETRUSAGE)
+    printf("C: Measure cpu usage and include results in output file\n");
+#endif
     printf("\n");
     exit(-12);
     return (0);
