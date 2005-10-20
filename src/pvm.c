@@ -15,7 +15,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "$Id: pvm.c,v 1.5 2003/03/18 05:08:11 turner Exp $";
+    "$Id: pvm.c,v 1.6 2003/11/12 06:21:29 bsmith Exp $";
 #endif
 
 
@@ -228,31 +228,6 @@ CleanUp(ArgStruct *p)
 {
 }
 
-void FreeBuff(char *buff1, char *buff2)
-{
-  if(buff1 != NULL)
-    free(buff1);
-
-  if(buff2 != NULL)
-    free(buff2);
-}
-
-void MyMalloc(ArgStruct *p, int bufflen)
-{
-    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
-        exit(-1);
-    }
-
-    if(!p->cache)
-      if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
-        {
-          fprintf(stderr,"Couldn't allocate memory for send buffer\n");
-          exit(-1);
-        }
-
-}
 
 void Reset(ArgStruct *p)
 {
@@ -264,10 +239,3 @@ void AfterAlignmentInit(ArgStruct *p)
 
 }
 
-void InitBufferData(ArgStruct* p, int nbytes)
-{
-  memset(p->r_buff, 'a', nbytes);
-
-  if(!p->cache)
-    memset(p->s_buff, 'b', nbytes);
-}

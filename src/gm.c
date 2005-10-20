@@ -12,10 +12,6 @@ void Init(ArgStruct *p, int* pargc, char*** pargv)
 
 void Setup(ArgStruct *p)
 {
-  char * host;
-  
-  host = p->host;
-
   if(gm_open(&gm_p,0,5,"port2",(enum gm_api_version) GM_API_VERSION) != GM_SUCCESS)
   {
     printf(" Couldn't open board 0 port 2\n");
@@ -24,7 +20,9 @@ void Setup(ArgStruct *p)
   else
     printf("Opened board 0 port2\n");
   
-  p->prot.host_id = gm_host_name_to_node_id(gm_p, host);
+  if( p->tr )
+    p->prot.host_id = gm_host_name_to_node_id(gm_p, p->host);
+
   gm_free_send_tokens(gm_p, GM_LOW_PRIORITY, gm_num_send_tokens(gm_p));
   ltime = gm_dma_malloc(gm_p, sizeof(unsigned long));
   lrpt  = gm_dma_malloc(gm_p, sizeof(unsigned long)); 
@@ -219,20 +217,30 @@ void CleanUp(ArgStruct *p)
    gm_finalize();
 }
 
-void MyMalloc(ArgStruct *p, int bufflen)
+
+void Reset(ArgStruct *p)
 {
-  if((p->r_buff = (char *)gm_dma_malloc(gm_p, bufflen))==(char *)NULL) 
+
+}
+
+void AfterAlignmentInit(ArgStruct *p)
+{
+
+}
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
+{  
+  if((p->r_buff = (char *)gm_dma_malloc(gm_p, bufflen+MAX(soffset,roffset)))==(char *)NULL)
   {
       fprintf(stderr,"couldn't allocate memory\n");
       exit(-1);
-  }
+  } 
 
   if(!p->cache)
-    if((p->s_buff = (char *)gm_dma_malloc(gm_p, bufflen))==(char *)NULL)
+    if((p->s_buff = (char *)gm_dma_malloc(gm_p, bufflen+soffset))==(char *)NULL)
     {
         fprintf(stderr,"Couldn't allocate memory\n");
         exit(-1);
-    }
+    } 
 }
 
 void FreeBuff(char *buff1, char *buff2)
@@ -244,20 +252,3 @@ void FreeBuff(char *buff1, char *buff2)
     gm_dma_free(gm_p, buff2);
 }
 
-void Reset(ArgStruct *p)
-{
-
-}
-
-void InitBufferData(ArgStruct *p, int nbytes)
-{
-  memset(p->r_buff, 'a', nbytes);
-
-  if(!p->cache)
-    memset(p->s_buff, 'b', nbytes);
-}
-
-void AfterAlignmentInit(ArgStruct *p)
-{
-
-}

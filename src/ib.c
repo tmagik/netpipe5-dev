@@ -14,10 +14,12 @@
 #include    <stdio.h>
 #include    <getopt.h>
 
+/* Debugging output macro */
+
 FILE* logfile;
 
 #if 0
-#define LOGPRINTF(_format, _aa...) fprintf(logfile, _format, ##_aa)
+#define LOGPRINTF(_format, _aa...) fprintf(logfile, __FUNCTION__": " _format, ##_aa); fflush(logfile)
 #else
 #define LOGPRINTF(_format, _aa...)
 #endif
@@ -28,10 +30,8 @@ FILE* logfile;
 #include    "evapi.h"       /* Mellanox Verbs API extension */
 #include    "vapi_common.h" /* Mellanox VIP layer of HCA Verbs */
 
-/* For IB buffer casts */
-typedef u_int32_t virt_addr_t;
+/* Global vars */
 
-/* Global IB vars */
 static VAPI_hca_hndl_t     hca_hndl=VAPI_INVAL_HNDL;
 static VAPI_hca_port_t     hca_port;
 static int                 port_num;
@@ -42,6 +42,7 @@ static VAPI_cqe_num_t      num_cqe;
 static VAPI_cqe_num_t      act_num_cqe;
 static VAPI_cq_hndl_t      s_cq_hndl=VAPI_INVAL_HNDL;
 static VAPI_cq_hndl_t      r_cq_hndl=VAPI_INVAL_HNDL;
+static EVAPI_compl_handler_hndl_t ceh_hndl=VAPI_INVAL_HNDL;
 static VAPI_mrw_t          mr_in;
 static VAPI_mrw_t          s_mr_out;
 static VAPI_mrw_t          r_mr_out;
@@ -55,13 +56,26 @@ static VAPI_qp_attr_mask_t qp_attr_mask;
 static VAPI_qp_attr_t      qp_attr;
 static VAPI_qp_cap_t       qp_cap;
 static VAPI_wc_desc_t      wc;
-static int                 max_wq=15000;
+static int                 max_wq=50000;
+static void*               remote_address;
+static VAPI_rkey_t         remote_key;
+static int                 receive_complete;
+
+/* Local prototypes */
+
+void event_handler(VAPI_hca_hndl_t, VAPI_cq_hndl_t, void*);
+
+/* Function definitions */
 
 void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
-  p->prot.ib_mtu = MTU1024;
-  p->tr = 0;
-  p->rcv = 1;
+   /* Set defaults
+    */
+   p->prot.ib_mtu = MTU1024;             /* 1024 Byte MTU                    */
+   p->prot.commtype = NP_COMM_SENDRECV;  /* Use Send/Receive communications  */
+   p->prot.comptype = NP_COMP_LOCALPOLL; /* Use local polling for completion */
+   p->tr = 0;                            /* I am not the transmitter         */
+   p->rcv = 1;                           /* I am the receiver                */      
 }
 
 void Setup(ArgStruct *p)
@@ -77,6 +91,15 @@ void Setup(ArgStruct *p)
  struct sigaction sigact1;
  char logfilename[80];
 
+ /* Sanity check */
+ if( p->prot.commtype == NP_COMM_RDMAWRITE && 
+     p->prot.comptype != NP_COMP_LOCALPOLL ) {
+   fprintf(stderr, "Error, RDMA Write may only be used with local polling.\n");
+   fprintf(stderr, "Try using RDMA Write With Immediate Data with vapi polling\n");
+   fprintf(stderr, "or event completion\n");
+   exit(-1);
+ }
+ 
  /* Open log file */
  sprintf(logfilename, ".iblog%d", 1 - p->tr);
  logfile = fopen(logfilename, "w");
@@ -149,398 +172,6 @@ void Setup(ArgStruct *p)
    exit(-1);
  }
 }   
-
-static int
-readFully(int fd, void *obuf, int len)
-{
-  int bytesLeft = len;
-  char *buf = (char *) obuf;
-  int bytesRead = 0;
-
-  while (bytesLeft > 0 &&
-        (bytesRead = read(fd, (void *) buf, bytesLeft)) > 0)
-    {
-      bytesLeft -= bytesRead;
-      buf += bytesRead;
-    }
-  if (bytesRead <= 0)
-    return bytesRead;
-  return len;
-}
-
-void Sync(ArgStruct *p)
-{
-    char s[] = "SyncMe";
-    char response[7];
-
-    if (write(p->commfd, s, strlen(s)) < 0 ||
-        readFully(p->commfd, response, strlen(s)) < 0)
-      {
-        perror("NetPIPE: error writing or reading synchronization string");
-        exit(3);
-      }
-    if (strncmp(s, response, strlen(s)))
-      {
-        fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
-        exit(3);
-      }
-}
-
-void PrepareToReceive(ArgStruct *p)
-{
-  VAPI_ret_t          ret;       /* Return code */
-  VAPI_rr_desc_t      rr;        /* Receive request */
-  VAPI_sg_lst_entry_t sg_entry;  /* Scatter/Gather list - holds buff addr */
-
-  rr.opcode = VAPI_RECEIVE;
-  rr.comp_type = VAPI_UNSIGNALED;
-  rr.id = 1;
-
-  rr.sg_lst_len = 1;
-  rr.sg_lst_p = &sg_entry;
-
-  sg_entry.lkey = r_mr_out.l_key;
-  sg_entry.len = p->bufflen;
-  sg_entry.addr = (VAPI_virt_addr_t)(virt_addr_t)p->r_ptr;
-
-  ret = VAPI_post_rr(hca_hndl, qp_hndl, &rr);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "  Error posting recv request: %s\n", VAPI_strerror(ret));
-    CleanUp(p);
-    exit(-1);
-  } else {
-    LOGPRINTF("  Posted recv request\n");
-  }
-
-}
-
-void SendData(ArgStruct *p)
-{
-  VAPI_ret_t          ret;       /* Return code */
-  VAPI_sr_desc_t      sr;        /* Send request */
-  VAPI_sg_lst_entry_t sg_entry;  /* Scatter/Gather list - holds buff addr */
-
-  /* Fill in send request struct */
-
-  sr.opcode = VAPI_SEND;
-  sr.comp_type = VAPI_UNSIGNALED;
-  sr.set_se = FALSE;  /* Set solicited event flag, not using events */
-  sr.remote_qkey = 0; /* Remote Queue Pair key */
-  sr.id = 1;          /* Request ID */
-
-  sr.sg_lst_len = 1;
-  sr.sg_lst_p = &sg_entry;
-
-  sg_entry.lkey = s_mr_out.l_key; /* Local memory region key */
-  sg_entry.len = p->bufflen;
-  sg_entry.addr = (VAPI_virt_addr_t)(virt_addr_t)p->s_ptr;
-
-  ret = VAPI_post_sr(hca_hndl, qp_hndl, &sr);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "  Error posting send request: %s\n", VAPI_strerror(ret));
-  } else {
-    LOGPRINTF("  Posted send request\n");
-  }
-
-}
-
-void RecvData(ArgStruct *p)
-{
-  VAPI_ret_t ret;
-
-  /* Busy wait for incoming data */
-
-  while(p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1) ) {
-    if((int)p % 2 == 3) printf("");
-  }
-
-  /* Reset last byte */
-  p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
-
-  LOGPRINTF("  Received all of data\n");
-
-}
-
-/* Reset is used after a trial to empty the work request queues so we
-   have enough room for the next trial to run */
-void Reset(ArgStruct *p)
-{
-
-  VAPI_ret_t          ret;       /* Return code */
-  VAPI_sr_desc_t      sr;        /* Send request */
-  VAPI_rr_desc_t      rr;        /* Recv request */
-
-  /* Prepost receive */
-  rr.opcode = VAPI_RECEIVE;
-  rr.comp_type = VAPI_SIGNALED;
-  rr.id = 1;
-
-  rr.sg_lst_len = 0;
-
-  LOGPRINTF(" * Posting recv request in Reset\n");
-  ret = VAPI_post_rr(hca_hndl, qp_hndl, &rr);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "  Error posting recv request: %s\n", VAPI_strerror(ret));
-    CleanUp(p);
-    exit(-1);
-  }
-
-  /* Make sure both nodes have preposted receives */
-  Sync(p);
-
-  /* Post Send */
-  sr.opcode = VAPI_SEND;
-  sr.comp_type = VAPI_SIGNALED;
-  sr.set_se = FALSE;
-  sr.remote_qkey = 0;
-  sr.id = 1;
-
-  sr.sg_lst_len = 0;
-
-  LOGPRINTF(" * Posting send request in Reset\n");
-  ret = VAPI_post_sr(hca_hndl, qp_hndl, &sr);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "  Error posting send request: %s\n", VAPI_strerror(ret));
-  } 
-
-  LOGPRINTF(" * Polling for completion of send request\n");
-  ret = VAPI_CQ_EMPTY;
-  while(ret == VAPI_CQ_EMPTY)
-    ret = VAPI_poll_cq(hca_hndl, s_cq_hndl, &wc);
-  
-  if(ret != VAPI_OK)
-    fprintf(stderr, "Error polling CQ for send in Reset: %s\n", VAPI_strerror(ret));
-
-  LOGPRINTF(" * Polling for completion of recv request\n");
-  ret = VAPI_CQ_EMPTY;
-  while(ret == VAPI_CQ_EMPTY) 
-    ret = VAPI_poll_cq(hca_hndl, r_cq_hndl, &wc);
-  
-  if(ret != VAPI_OK)
-    fprintf(stderr, "Error polling CQ for recv in Reset: %s\n", VAPI_strerror(ret));
-
-}
-
-void SendTime(ArgStruct *p, double *t)
-{
-    unsigned long ltime, ntime;
-
-    /*
-      Multiply the number of seconds by 1e6 to get time in microseconds
-      and convert value to an unsigned 32-bit integer.
-      */
-    ltime = (unsigned long)(*t * 1.e6);
-
-    /* Send time in network order */
-    ntime = htonl(ltime);
-    if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
-      {
-        printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
-        exit(301);
-      }
-}
-
-void RecvTime(ArgStruct *p, double *t)
-{
-    unsigned long ltime, ntime;
-    int bytesRead;
-
-    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
-    if (bytesRead < 0)
-      {
-        printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
-        exit(302);
-      }
-    else if (bytesRead != sizeof(unsigned long))
-      {
-        fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
-                bytesRead);
-        exit(303);
-      }
-    ltime = ntohl(ntime);
-
-    /* Result is ltime (in microseconds) divided by 1.0e6 to get seconds */
-    *t = (double)ltime / 1.0e6;
-}
-
-void SendRepeat(ArgStruct *p, int rpt)
-{
-  unsigned long lrpt, nrpt;
-
-  lrpt = rpt;
-  /* Send repeat count as a long in network order */
-  nrpt = htonl(lrpt);
-  if (write(p->commfd, (void *) &nrpt, sizeof(unsigned long)) < 0)
-    {
-      printf("NetPIPE: write failed in SendRepeat: errno=%d\n", errno);
-      exit(304);
-    }
-}
-
-void RecvRepeat(ArgStruct *p, int *rpt)
-{
-  unsigned long lrpt, nrpt;
-  int bytesRead;
-
-  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(unsigned long));
-  if (bytesRead < 0)
-    {
-      printf("NetPIPE: read failed in RecvRepeat: errno=%d\n", errno);
-      exit(305);
-    }
-  else if (bytesRead != sizeof(unsigned long))
-    {
-      fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
-              bytesRead);
-      exit(306);
-    }
-  lrpt = ntohl(nrpt);
-
-  *rpt = lrpt;
-}
-
-int establish(ArgStruct *p)
-{
- int clen;
- int one = 1;
- struct protoent;
-
- clen = sizeof(p->prot.sin2);
- if(p->tr){
-   if(connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
-              sizeof(p->prot.sin1)) < 0){
-     printf("Client: Cannot Connect! errno=%d\n",errno);
-     exit(-10);
-   }
-  }
-  else {
-    /* SERVER */
-    listen(p->servicefd, 5);
-    p->commfd = accept(p->servicefd, (struct sockaddr *) &(p->prot.sin2),
-                       &clen);
-
-    if(p->commfd < 0){
-      printf("Server: Accept Failed! errno=%d\n",errno);
-      exit(-12);
-    }
-  }
-}
-
-void CleanUp(ArgStruct *p)
-{
-   char *quit="QUIT";
-   if (p->tr)
-   {
-      write(p->commfd,quit, 5);
-      read(p->commfd, quit, 5);
-      close(p->commfd);
-   }
-   else
-   {
-      read(p->commfd,quit, 5);
-      write(p->commfd,quit,5);
-      close(p->commfd);
-      close(p->servicefd);
-   }
-
-   finalizeIB(p);
-}
-
-void FreeBuff(char *buff1, char *buff2)
-{
-  VAPI_ret_t ret;
-
-  if(s_mr_hndl != VAPI_INVAL_HNDL) {
-    LOGPRINTF("Deregistering send buffer\n");
-    ret = VAPI_deregister_mr(hca_hndl, s_mr_hndl);
-    if(ret != VAPI_OK) {
-      fprintf(stderr, "Error deregistering send mr: %s\n", VAPI_strerror(ret));
-    } else {
-      s_mr_hndl = VAPI_INVAL_HNDL;
-    }
-  }
-
-  if(r_mr_hndl != VAPI_INVAL_HNDL) {
-    LOGPRINTF("Deregistering recv buffer\n");
-    ret = VAPI_deregister_mr(hca_hndl, r_mr_hndl);
-    if(ret != VAPI_OK) {
-      fprintf(stderr, "Error deregistering recv mr: %s\n", VAPI_strerror(ret));
-    } else {
-      r_mr_hndl = VAPI_INVAL_HNDL;
-    }
-  }
-
-  if(buff1 != NULL)
-    free(buff1);
-
-  if(buff2 != NULL)
-    free(buff2);
-}
-
-void MyMalloc(ArgStruct *p, int bufflen)
-{
-  VAPI_ret_t ret;
-
-  /* Register recv buffer */
-
-  p->r_buff = VMALLOC(bufflen);
-  if(p->r_buff == NULL) {
-    fprintf(stderr, "Error malloc'ing buffer\n");
-    exit(-1);
-  }
-
-  mr_in.acl = VAPI_EN_LOCAL_WRITE | VAPI_EN_REMOTE_WRITE;
-  mr_in.l_key = 0;
-  mr_in.pd_hndl = pd_hndl;
-  mr_in.r_key = 0;
-  mr_in.size = bufflen;
-  mr_in.start = (VAPI_virt_addr_t)(virt_addr_t)p->r_buff;
-  mr_in.type = VAPI_MR;
-
-  ret = VAPI_register_mr(hca_hndl, &mr_in, &r_mr_hndl, &r_mr_out);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "Error registering recv buffer: %s\n", VAPI_strerror(ret));
-    exit(-1);
-  } else {
-    LOGPRINTF("Registered Recv Buffer\n");
-  }
-
-  /* Register send buffer */
-
-  if(p->cache) {
-    
-    /* Infiniband spec says we can register same memory region
-     * more than once, so just copy buffer address
-     */
-    p->s_buff = p->r_buff;
-
-  } else {
-
-    p->s_buff = VMALLOC(bufflen);
-    if(p->s_buff == NULL) {
-      fprintf(stderr, "Error malloc'ing buffer\n");
-      exit(-1);
-    }
-
-  }
-
-  mr_in.acl = VAPI_EN_LOCAL_WRITE | VAPI_EN_REMOTE_WRITE;
-  mr_in.l_key = 0;
-  mr_in.pd_hndl = pd_hndl;
-  mr_in.r_key = 0;
-  mr_in.size = bufflen;
-  mr_in.start = (VAPI_virt_addr_t)(virt_addr_t)p->s_buff;
-  mr_in.type = VAPI_MR;
-  
-  ret = VAPI_register_mr(hca_hndl, &mr_in, &s_mr_hndl, &s_mr_out);
-  if(ret != VAPI_OK) {
-    fprintf(stderr, "Error registering send buffer: %s\n", VAPI_strerror(ret));
-    exit(-1);
-  } else {
-    LOGPRINTF("Registered Send Buffer\n");
-  }
-
-}
 
 int initIB(ArgStruct *p)
 {
@@ -757,6 +388,14 @@ int initIB(ArgStruct *p)
   
   LOGPRINTF("Modified QP to RTS\n");
 
+  /* Register event completion handler if we're using it */
+
+  if( p->prot.comptype == NP_COMP_EVENT ) {
+
+    EVAPI_set_comp_eventh(hca_hndl, r_cq_hndl, event_handler, NULL, &ceh_hndl);
+
+  }
+ 
   return 0;
 }
 
@@ -765,6 +404,17 @@ int finalizeIB(ArgStruct *p)
   VAPI_ret_t ret;
 
   LOGPRINTF("Finalizing IB stuff\n");
+
+  /* Clear completion event handler */
+
+  if(p->prot.comptype == NP_COMP_EVENT ) {
+     LOGPRINTF("Clearing comp handler\n");
+     ret = EVAPI_clear_comp_eventh(hca_hndl, ceh_hndl);
+     if(ret != VAPI_OK) {
+        fprintf(stderr, "Error clearing event handler: %s\n",
+                VAPI_strerror(ret));
+     }
+  }
 
   if(qp_hndl != VAPI_INVAL_HNDL) {
     LOGPRINTF("Destroying QP\n");
@@ -828,30 +478,579 @@ int finalizeIB(ArgStruct *p)
   return 0;
 }
 
-
-void InitBufferData(ArgStruct *p, int nbytes)
+void event_handler(VAPI_hca_hndl_t hca, VAPI_cq_hndl_t cq, void* data)
 {
-  memset(p->r_buff, 'a', nbytes);
+  VAPI_ret_t    ret;
 
-  /* If using cache mode, then we need to initialize the last byte
-   * to the proper value since the transmitter and receiver are waiting
-   * on different values to determine when the message has completely
-   * arrive.
-   */
-  if(p->cache)
+  ret = VAPI_poll_cq(hca, cq, &wc);
 
-    p->r_buff[nbytes-1] = 'a' + p->tr;
+  if(ret == VAPI_CQ_EMPTY) {
+     LOGPRINTF("Empty completion queue\n");
+     return;
+  } else if(ret != VAPI_SUCCESS) {
+     fprintf(stderr, "Error in event_handler, polling cq: %s\n",
+             VAPI_strerror(ret));
+     exit(-1);
+  }
+  
+  LOGPRINTF("Retrieved work completion\n");
 
-  /* If using no-cache mode, then we have distinct send and receive
-   * buffers, so the send buffer starts out containing different values
-   * from the receive buffer
-   */
-  else
-
-    memset(p->s_buff, 'b', nbytes);
+  receive_complete = 1;
 }
+
+static int
+readFully(int fd, void *obuf, int len)
+{
+  int bytesLeft = len;
+  char *buf = (char *) obuf;
+  int bytesRead = 0;
+
+  while (bytesLeft > 0 &&
+        (bytesRead = read(fd, (void *) buf, bytesLeft)) > 0)
+    {
+      bytesLeft -= bytesRead;
+      buf += bytesRead;
+    }
+  if (bytesRead <= 0)
+    return bytesRead;
+  return len;
+}
+
+void Sync(ArgStruct *p)
+{
+    char s[] = "SyncMe";
+    char response[7];
+
+    if (write(p->commfd, s, strlen(s)) < 0 ||
+        readFully(p->commfd, response, strlen(s)) < 0)
+      {
+        perror("NetPIPE: error writing or reading synchronization string");
+        exit(3);
+      }
+    if (strncmp(s, response, strlen(s)))
+      {
+        fprintf(stderr, "NetPIPE: Synchronization string incorrect!\n");
+        exit(3);
+      }
+}
+
+void PrepareToReceive(ArgStruct *p)
+{
+  VAPI_ret_t          ret;       /* Return code */
+  VAPI_rr_desc_t      rr;        /* Receive request */
+  VAPI_sg_lst_entry_t sg_entry;  /* Scatter/Gather list - holds buff addr */
+
+  /* We don't need to post a receive if doing RDMA write with local polling */
+
+  if( p->prot.commtype == NP_COMM_RDMAWRITE &&
+      p->prot.comptype == NP_COMP_LOCALPOLL )
+     return;
+  
+  rr.opcode = VAPI_RECEIVE;
+
+  /* We only need signaled completions if using VAPI
+   * completion methods.
+   */
+  if( p->prot.comptype == NP_COMP_LOCALPOLL )
+     rr.comp_type = VAPI_UNSIGNALED;
+  else
+     rr.comp_type = VAPI_SIGNALED;
+  rr.id = 1;
+
+  rr.sg_lst_len = 1;
+  rr.sg_lst_p = &sg_entry;
+
+  sg_entry.lkey = r_mr_out.l_key;
+  sg_entry.len = p->bufflen;
+  sg_entry.addr = (u_int32_t)p->r_ptr;
+
+  ret = VAPI_post_rr(hca_hndl, qp_hndl, &rr);
+  if(ret != VAPI_OK) {
+    fprintf(stderr, "Error posting recv request: %s\n", VAPI_strerror(ret));
+    CleanUp(p);
+    exit(-1);
+  } else {
+    LOGPRINTF("Posted recv request\n");
+  }
+
+  /* Set receive flag to zero and request event completion 
+   * notification for this receive so the event handler will 
+   * be triggered when the receive completes.
+   */
+  if( p->prot.comptype == NP_COMP_EVENT ) {
+    receive_complete = 0;
+    VAPI_req_comp_notif(hca_hndl, r_cq_hndl, VAPI_NEXT_COMP);
+  }
+}
+
+void SendData(ArgStruct *p)
+{
+  VAPI_ret_t          ret;       /* Return code */
+  VAPI_sr_desc_t      sr;        /* Send request */
+  VAPI_sg_lst_entry_t sg_entry;  /* Scatter/Gather list - holds buff addr */
+
+  /* Fill in send request struct */
+
+  if(p->prot.commtype == NP_COMM_SENDRECV) {
+     sr.opcode = VAPI_SEND;
+     LOGPRINTF("Doing regular send\n");
+  } else if(p->prot.commtype == NP_COMM_SENDRECV_WITH_IMM) {
+     sr.opcode = VAPI_SEND_WITH_IMM;
+     LOGPRINTF("Doing regular send with imm\n");
+  } else if(p->prot.commtype == NP_COMM_RDMAWRITE) {
+     sr.opcode = VAPI_RDMA_WRITE;
+     sr.remote_addr = (u_int32_t)(remote_address + (p->s_ptr - p->s_buff));
+     sr.r_key = remote_key;
+     LOGPRINTF("Doing RDMA write (raddr=%p)\n", sr.remote_addr);
+  } else if(p->prot.commtype == NP_COMM_RDMAWRITE_WITH_IMM) {
+     sr.opcode = VAPI_RDMA_WRITE_WITH_IMM;
+     sr.remote_addr = (u_int32_t)(remote_address + (p->s_ptr - p->s_buff));
+     sr.r_key = remote_key;
+     LOGPRINTF("Doing RDMA write with imm (raddr=%p)\n", sr.remote_addr);
+  } else {
+     fprintf(stderr, "Error, invalid communication type in SendData\n");
+     exit(-1);
+  }
+  
+  sr.comp_type = VAPI_UNSIGNALED;
+  sr.set_se = FALSE;  /* Set solicited event flag, not using events */
+  sr.remote_qkey = 0; /* Remote Queue Pair key */
+  sr.id = 1;          /* Request ID */
+  sr.imm_data = 1;    /* Immediate data */
+
+  sr.sg_lst_len = 1;
+  sr.sg_lst_p = &sg_entry;
+
+  sg_entry.lkey = s_mr_out.l_key; /* Local memory region key */
+  sg_entry.len = p->bufflen;
+  sg_entry.addr = (u_int32_t)p->s_ptr;
+
+  ret = VAPI_post_sr(hca_hndl, qp_hndl, &sr);
+  if(ret != VAPI_OK) {
+    fprintf(stderr, "Error posting send request: %s\n", VAPI_strerror(ret));
+  } else {
+    LOGPRINTF("Posted send request\n");
+  }
+
+}
+
+void RecvData(ArgStruct *p)
+{
+  VAPI_ret_t ret;
+
+  /* Busy wait for incoming data */
+
+  LOGPRINTF("Receiving at buffer address %p\n", p->r_ptr);
+
+  if( p->prot.comptype == NP_COMP_LOCALPOLL ) {
+       
+    /* Poll for receive completion locally on the receive data */
+
+    LOGPRINTF("Waiting for last byte of data to arrive\n");
+     
+    while(p->r_ptr[p->bufflen-1] != 'a' + (p->cache ? 1 - p->tr : 1) ) {
+      if((int)p % 2 == 3) printf("");
+    }
+
+    /* Reset last byte */
+    p->r_ptr[p->bufflen-1] = 'a' + (p->cache ? p->tr : 0);
+
+    LOGPRINTF("Received all of data\n");
+
+  } else if( p->prot.comptype == NP_COMP_VAPIPOLL ) {
+     
+     /* Poll for receive completion using VAPI poll function */
+
+     LOGPRINTF("Polling completion queue for VAPI work completion\n");
+     
+     ret = VAPI_CQ_EMPTY;
+     while(ret == VAPI_CQ_EMPTY)
+        ret = VAPI_poll_cq(hca_hndl, r_cq_hndl, &wc);
+
+     if(ret != VAPI_SUCCESS) {
+        fprintf(stderr, "Error in RecvData, polling for completion: %s\n",
+                VAPI_strerror(ret));
+        exit(-1);
+     }
+
+     if(wc.status != VAPI_OK) {
+        fprintf(stderr, "Error in status of returned completion: %s\n",
+              VAPI_wc_status_sym(wc.status));
+        exit(-1);
+     }
+
+     LOGPRINTF("Retrieved successful completion\n");
+     
+  } else if( p->prot.comptype == NP_COMP_EVENT ) {
+
+     /* Instead of polling directly on data or VAPI completion queue,
+      * let the VAPI event completion handler set a flag when the receive
+      * completes, and poll on that instead. Could try using semaphore here
+      * as well to eliminate busy polling
+      */
+
+     LOGPRINTF("Polling receive flag\n");
+     
+     while( receive_complete == 0 )
+        sched_yield(); /* Calling a function should force compiler to
+                        * keep the implied memory reload in every iteration
+                        * of the loop.
+                        */
+
+     LOGPRINTF("Receive completed\n");
+  }
+}
+
+/* Reset is used after a trial to empty the work request queues so we
+   have enough room for the next trial to run */
+void Reset(ArgStruct *p)
+{
+
+  VAPI_ret_t          ret;       /* Return code */
+  VAPI_sr_desc_t      sr;        /* Send request */
+  VAPI_rr_desc_t      rr;        /* Recv request */
+
+  /* Prepost receive */
+  rr.opcode = VAPI_RECEIVE;
+  rr.comp_type = VAPI_SIGNALED;
+  rr.id = 1;
+
+  rr.sg_lst_len = 0;
+
+  LOGPRINTF("Posting recv request in Reset\n");
+  ret = VAPI_post_rr(hca_hndl, qp_hndl, &rr);
+  if(ret != VAPI_OK) {
+    fprintf(stderr, "  Error posting recv request: %s\n", VAPI_strerror(ret));
+    CleanUp(p);
+    exit(-1);
+  }
+
+  /* Make sure both nodes have preposted receives */
+  Sync(p);
+
+  /* Post Send */
+  sr.opcode = VAPI_SEND;
+  sr.comp_type = VAPI_SIGNALED;
+  sr.set_se = FALSE;
+  sr.remote_qkey = 0;
+  sr.id = 1;
+
+  sr.sg_lst_len = 0;
+
+  LOGPRINTF("Posting send request \n");
+  ret = VAPI_post_sr(hca_hndl, qp_hndl, &sr);
+  if(ret != VAPI_OK) {
+    fprintf(stderr, "  Error posting send request in Reset: %s\n", 
+            VAPI_strerror(ret));
+  } 
+
+  LOGPRINTF("Polling for completion of send request\n");
+  ret = VAPI_CQ_EMPTY;
+  while(ret == VAPI_CQ_EMPTY)
+    ret = VAPI_poll_cq(hca_hndl, s_cq_hndl, &wc);
+  
+
+  if(ret != VAPI_OK)
+    fprintf(stderr, "Error polling CQ for send in Reset: %s\n", 
+            VAPI_strerror(ret));
+  
+  LOGPRINTF("Status of send completion: %s\n", VAPI_wc_status_sym(wc.status));
+
+  LOGPRINTF("Polling for completion of recv request\n");
+  ret = VAPI_CQ_EMPTY;
+  while(ret == VAPI_CQ_EMPTY) 
+    ret = VAPI_poll_cq(hca_hndl, r_cq_hndl, &wc);
+  
+  if(ret != VAPI_OK)
+    fprintf(stderr, "Error polling CQ for recv in Reset: %s\n", 
+            VAPI_strerror(ret));
+
+  LOGPRINTF("Status of recv completion: %s\n", VAPI_wc_status_sym(wc.status));
+
+  LOGPRINTF("Done with reset\n");
+}
+
+void SendTime(ArgStruct *p, double *t)
+{
+    unsigned long ltime, ntime;
+
+    /*
+      Multiply the number of seconds by 1e6 to get time in microseconds
+      and convert value to an unsigned 32-bit integer.
+      */
+    ltime = (unsigned long)(*t * 1.e6);
+
+    /* Send time in network order */
+    ntime = htonl(ltime);
+    if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
+      {
+        printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
+        exit(301);
+      }
+}
+
+void RecvTime(ArgStruct *p, double *t)
+{
+    unsigned long ltime, ntime;
+    int bytesRead;
+
+    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
+    if (bytesRead < 0)
+      {
+        printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
+        exit(302);
+      }
+    else if (bytesRead != sizeof(unsigned long))
+      {
+        fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
+                bytesRead);
+        exit(303);
+      }
+    ltime = ntohl(ntime);
+
+    /* Result is ltime (in microseconds) divided by 1.0e6 to get seconds */
+    *t = (double)ltime / 1.0e6;
+}
+
+void SendRepeat(ArgStruct *p, int rpt)
+{
+  unsigned long lrpt, nrpt;
+
+  lrpt = rpt;
+  /* Send repeat count as a long in network order */
+  nrpt = htonl(lrpt);
+  if (write(p->commfd, (void *) &nrpt, sizeof(unsigned long)) < 0)
+    {
+      printf("NetPIPE: write failed in SendRepeat: errno=%d\n", errno);
+      exit(304);
+    }
+}
+
+void RecvRepeat(ArgStruct *p, int *rpt)
+{
+  unsigned long lrpt, nrpt;
+  int bytesRead;
+
+  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(unsigned long));
+  if (bytesRead < 0)
+    {
+      printf("NetPIPE: read failed in RecvRepeat: errno=%d\n", errno);
+      exit(305);
+    }
+  else if (bytesRead != sizeof(unsigned long))
+    {
+      fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
+              bytesRead);
+      exit(306);
+    }
+  lrpt = ntohl(nrpt);
+
+  *rpt = lrpt;
+}
+
+int establish(ArgStruct *p)
+{
+ int clen;
+ int one = 1;
+ struct protoent;
+
+ clen = sizeof(p->prot.sin2);
+ if(p->tr){
+   if(connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
+              sizeof(p->prot.sin1)) < 0){
+     printf("Client: Cannot Connect! errno=%d\n",errno);
+     exit(-10);
+   }
+  }
+  else {
+    /* SERVER */
+    listen(p->servicefd, 5);
+    p->commfd = accept(p->servicefd, (struct sockaddr *) &(p->prot.sin2),
+                       &clen);
+
+    if(p->commfd < 0){
+      printf("Server: Accept Failed! errno=%d\n",errno);
+      exit(-12);
+    }
+  }
+}
+
+void CleanUp(ArgStruct *p)
+{
+   char *quit="QUIT";
+   if (p->tr)
+   {
+      write(p->commfd,quit, 5);
+      read(p->commfd, quit, 5);
+      close(p->commfd);
+   }
+   else
+   {
+      read(p->commfd,quit, 5);
+      write(p->commfd,quit,5);
+      close(p->commfd);
+      close(p->servicefd);
+   }
+
+   finalizeIB(p);
+}
+
 
 void AfterAlignmentInit(ArgStruct *p)
 {
+  int bytesRead;
+
+  /* Exchange buffer pointers and remote infiniband keys if doing rdma. Do
+   * the exchange in this function because this will happen after any
+   * memory alignment is done, which is important for getting the 
+   * correct remote address.
+  */
+  if( p->prot.commtype == NP_COMM_RDMAWRITE || 
+      p->prot.commtype == NP_COMM_RDMAWRITE_WITH_IMM ) {
+     
+     /* Send my receive buffer address
+      */
+     if(write(p->commfd, (void *)&p->r_buff, sizeof(void*)) < 0) {
+        perror("NetPIPE: write of buffer address failed in MyMalloc");
+        exit(-1);
+     }
+     
+     LOGPRINTF("Sent buffer address: %p\n", p->r_buff);
+     
+     /* Send my remote key for accessing
+      * my remote buffer via IB RDMA
+      */
+     if(write(p->commfd, (void *)&r_mr_out.r_key, sizeof(VAPI_rkey_t)) < 0) {
+        perror("NetPIPE: write of remote key failed in MyMalloc");
+        exit(-1);
+     }
+  
+     LOGPRINTF("Sent remote key: %d\n", r_mr_out.r_key);
+     
+     /* Read the sent data
+      */
+     bytesRead = readFully(p->commfd, (void *)&remote_address, sizeof(void*));
+     if (bytesRead < 0) {
+        perror("NetPIPE: read of buffer address failed in MyMalloc");
+        exit(-1);
+     } else if (bytesRead != sizeof(unsigned long)) {
+        perror("NetPIPE: partial read of buffer address in MyMalloc");
+        exit(-1);
+     }
+     
+     LOGPRINTF("Received remote address from other node: %p\n", remote_address);
+     
+     bytesRead = readFully(p->commfd, (void *)&remote_key, sizeof(VAPI_rkey_t));
+     if (bytesRead < 0) {
+        perror("NetPIPE: read of remote key failed in MyMalloc");
+        exit(-1);
+     } else if (bytesRead != sizeof(unsigned long)) {
+        perror("NetPIPE: partial read of remote key in MyMalloc");
+        exit(-1);
+     }
+     
+     LOGPRINTF("Received remote key from other node: %d\n", remote_key);
+
+  }
+}
+
+
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
+{
+  VAPI_ret_t ret;
+
+  /* Allocate buffers */
+
+  p->r_buff = malloc(bufflen+MAX(soffset,roffset));
+  if(p->r_buff == NULL) {
+    fprintf(stderr, "Error malloc'ing buffer\n");
+    exit(-1);
+  }
+
+  if(p->cache) {
+
+    /* Infiniband spec says we can register same memory region
+     * more than once, so just copy buffer address. We will register
+     * the same buffer twice with Infiniband.
+     */
+    p->s_buff = p->r_buff;
+
+  } else {
+
+    p->s_buff = malloc(bufflen+soffset);
+    if(p->s_buff == NULL) {
+      fprintf(stderr, "Error malloc'ing buffer\n");
+      exit(-1);
+    }
+
+  }
+
+  /* Register buffers with Infiniband */
+
+  mr_in.acl = VAPI_EN_LOCAL_WRITE | VAPI_EN_REMOTE_WRITE;
+  mr_in.l_key = 0;
+  mr_in.pd_hndl = pd_hndl;
+  mr_in.r_key = 0;
+  mr_in.size = bufflen+MAX(soffset,roffset);
+  mr_in.start = (u_int32_t)p->r_buff;
+  mr_in.type = VAPI_MR;
+
+  ret = VAPI_register_mr(hca_hndl, &mr_in, &r_mr_hndl, &r_mr_out);
+  if(ret != VAPI_OK)
+        {
+    fprintf(stderr, "Error registering recv buffer: %s\n", VAPI_strerror(ret));
+    exit(-1);
+        }
+        else
+        {
+         LOGPRINTF("Registered Recv Buffer\n");
+        }
+
+  mr_in.acl = VAPI_EN_LOCAL_WRITE;
+  mr_in.l_key = 0;
+  mr_in.pd_hndl = pd_hndl;
+  mr_in.r_key = 0;
+  mr_in.size = bufflen+soffset;
+  mr_in.start = (u_int32_t)p->s_buff;
+  mr_in.type = VAPI_MR;
+
+  ret = VAPI_register_mr(hca_hndl, &mr_in, &s_mr_hndl, &s_mr_out);
+  if(ret != VAPI_OK) {
+    fprintf(stderr, "Error registering send buffer: %s\n", VAPI_strerror(ret));
+    exit(-1);
+  } else {
+    LOGPRINTF("Registered Send Buffer\n");
+  }
 
 }
+void FreeBuff(char *buff1, char *buff2)
+{
+  VAPI_ret_t ret;
+
+  if(s_mr_hndl != VAPI_INVAL_HNDL) {
+    LOGPRINTF("Deregistering send buffer\n");
+    ret = VAPI_deregister_mr(hca_hndl, s_mr_hndl);
+    if(ret != VAPI_OK) {
+      fprintf(stderr, "Error deregistering send mr: %s\n", VAPI_strerror(ret));
+    } else {
+      s_mr_hndl = VAPI_INVAL_HNDL;
+    }
+  }
+
+  if(r_mr_hndl != VAPI_INVAL_HNDL) {
+    LOGPRINTF("Deregistering recv buffer\n");
+    ret = VAPI_deregister_mr(hca_hndl, r_mr_hndl);
+    if(ret != VAPI_OK) {
+      fprintf(stderr, "Error deregistering recv mr: %s\n", VAPI_strerror(ret));
+    } else {
+      r_mr_hndl = VAPI_INVAL_HNDL;
+    }
+  }
+
+  if(buff1 != NULL)
+    free(buff1);
+
+  if(buff2 != NULL)
+    free(buff2);
+}
+

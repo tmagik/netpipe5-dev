@@ -1,30 +1,25 @@
 
   For more complete information on NetPIPE, visit the webpage at:
 
-http://www.scl.ameslab.gov/Projects/Netpipe/
+http://www.scl.ameslab.gov/Projects/NetPIPE/
 
 NetPIPE was originally developed by Quinn Snell, Armin Mikler,
 John Gustafson, and Guy Helmer.
 
 It is currently being developed and maintained by Dave Turner with
-help from several graduate students (Xuehua Chen, Adam Oline, Bogdan Vasiliu).
+help from several graduate students (Xuehua Chen, Adam Oline, 
+Brian Smith, Bogdan Vasiliu).
 
-The latest release, version 3.2, includes additional modules to test
-PVM, TCGMSG, SHMEM, and MPI-2, as well as the GM, GPSHMEM, ARMCI, and LAPI
-software layers they run upon.  
+Version 3.6 adds the ability to test with and without cache effects,
+and the ability to offset both the source and destination buffers.
+A memcpy module has also been added.
 
 Release 3.3 includes an Infiniband module for the Mellanox VAPI.
 It also has an integrity check (-i), which is still being developed.
 
-Release 3.5 removes the CPU utilization measurements.  Getrusage is
-probably not very accurate, so a dummy workload will eventually be
-used instead.
-The streaming mode has also been fixed.  When run at Gigabit speeds,
-the TCP window size would collapse limit performance of subsequent
-data points.  Now we reset the sockets between trials to prevent this.
-We have also added in a module to evaluate memory copy rates.
--n now sets a constant number of repeats for each trial.
--r resets the sockets between each trial (automatic for streaming).
+Version 3.2 includes additional modules to test
+PVM, TCGMSG, SHMEM, and MPI-2, as well as the GM, GPSHMEM, ARMCI, and LAPI
+software layers they run upon.  
 
 If you have problems or comments, please email netpipe@scl.ameslab.gov
 
@@ -80,6 +75,8 @@ NetPIPE is run, and are in order of their general usefulness.
             This can make a huge difference for Gigabit Ethernet cards.
             You may need to tune the OS to set a larger maximum TCP
             buffer size for optimal performance.
+
+        -O: specify transmit and optionally receive buffer offsets <-O 1,3>
 
 	-l: lower bound (start value for block size) e.g. "-l 1"
 

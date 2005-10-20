@@ -1,3 +1,4 @@
+
 /*****************************************************************************/
 /* "NetPIPE" -- Network Protocol Independent Performance Evaluator.          */
 /* Copyright 1997, 1998 Iowa State University Research Foundation, Inc.      */
@@ -23,16 +24,16 @@
 #include "netpipe.h"
 
 #if defined(MPLITE)
-#include "mplite.h" /* Included for the malloc wrapper to protect from
-                       mallocs in sigio handler (very rare, may not occur?) */
+#include "mplite.h" /* Included for the malloc wrapper to protect from */
 #endif
+
 
 extern char *optarg;
 
 main(int argc, char **argv)
 {
     FILE        *out;           /* Output data file                          */
-    char        s[255];         /* Generic string                            */
+    char        s[255],s2[255],delim[255],*pstr; /* Generic strings          */
     int         *memcache;      /* used to flush cache                       */
 
     int         len_buf_align,  /* meaningful when args.cache is 0. buflen   */
@@ -59,7 +60,7 @@ main(int argc, char **argv)
    
     ArgStruct   args;           /* Arguments for all the calls               */
 
-    double      t, t0, tpoint5, t1, t2,  /* Time variables                            */
+    double      t, t0, t1, t2,  /* Time variables                            */
                 tlast,          /* Time for the last transmission            */
                 latency;        /* Network message latency                   */
 
@@ -81,6 +82,8 @@ main(int argc, char **argv)
 
     args.cache = 1; /* Default to use cache */
     args.host  = NULL; /* XXX - DEBUGGING GM */
+	 args.soffset=0; /* default to no offsets */
+	 args.roffset=0; 
 
 
     /* TCGMSG launches NPtcgmsg with a -master master_hostname
@@ -91,10 +94,27 @@ main(int argc, char **argv)
 #if ! defined(TCGMSG)
 
     /* Parse the arguments. See Usage for description */
-    while ((c = getopt(argc, argv, "rIiPszgfcaBh:p:o:l:u:b:m:n:")) != -1)
+    while ((c = getopt(argc, argv, "O:rIiPszgfaBh:p:o:l:u:b:m:n:t:c:")) != -1)
     {
         switch(c)
         {
+					case 'O':
+							strcpy(s2,optarg);
+							strcpy(delim,",");
+							if((pstr=strtok(s2,delim))!=NULL)
+							{
+								args.soffset=atoi(pstr);
+								if((pstr=strtok((char *)NULL,delim))!=NULL)
+									args.roffset=atoi(pstr);
+								else /* only got one token */
+									args.roffset=args.soffset;
+							}
+							else
+							{
+								args.soffset=0; args.roffset=0;
+							}
+							printf("Transmit buffer offset: %d\nReceive buffer offset: %d\n",args.soffset,args.roffset);
+						break;
             case 'p': perturbation = atoi(optarg);
                       if( perturbation > 0 ) {
                          printf("Using a perturbation value of %d\n\n", perturbation);
@@ -113,11 +133,6 @@ main(int argc, char **argv)
                       printf("Preposting all receives before a timed run.\n");
                       printf("Some would consider this cheating,\n");
                       printf("but it is needed to match some vendor tests.\n"); fflush(stdout);
-                      break;
-
-            case 'c': printf("WARNING: The -c switch is not currently in use.\n");
-                      printf("Cache effects are enabled by default.\n");
-                      printf("Use -I (invalidate cache) to measure without cache effects.\n"); fflush(stdout);
                       break;
 
             case 'I': args.cache = 0;
@@ -215,9 +230,51 @@ main(int argc, char **argv)
                         case 4096: args.prot.ib_mtu = MTU4096;
                           break;
                         default: 
-                          fprintf(stderr, "Invalid MTU size, must be one of " \
+                          fprintf(stderr, "Invalid MTU size, must be one of "
                                           "256, 512, 1024, 2048, 4096\n");
                           exit(-1);
+                      }
+                      break;
+
+            case 't': if( !strcmp(optarg, "send_recv") ) {
+                         printf("Using Send/Receive communications\n");
+                         args.prot.commtype = NP_COMM_SENDRECV;
+                      } else if( !strcmp(optarg, "send_recv_with_imm") ) {
+                         printf("Using Send/Receive communications with immediate data\n");
+                         args.prot.commtype = NP_COMM_SENDRECV_WITH_IMM;
+                      } else if( !strcmp(optarg, "rdma_write") ) {
+                         printf("Using RDMA Write communications\n");
+                         args.prot.commtype = NP_COMM_RDMAWRITE;
+                      } else if( !strcmp(optarg, "rdma_write_with_imm") ) {
+                         printf("Using RDMA Write communications with immediate data\n");
+                         args.prot.commtype = NP_COMM_RDMAWRITE_WITH_IMM;
+                      } else {
+                         fprintf(stderr, "Invalid transfer type "
+                                 "specified, please choose one of:\n\n"
+                                 "\tsend_recv\t\tUse Send/Receive communications\t(default)\n"
+                                 "\tsend_recv_with_imm\tSame as above with immediate data\n"
+                                 "\trdma_write\t\tUse RDMA Write communications\n"
+                                 "\trdma_write_with_imm\tSame as above with immediate data\n\n");
+                         exit(-1);
+                      }
+                      break;
+
+            case 'c': if( !strcmp(optarg, "local_poll") ) {
+                         printf("Using local polling completion\n");
+                         args.prot.comptype = NP_COMP_LOCALPOLL;
+                      } else if( !strcmp(optarg, "vapi_poll") ) {
+                         printf("Using VAPI polling completion\n");
+                         args.prot.comptype = NP_COMP_VAPIPOLL;
+                      } else if( !strcmp(optarg, "event") ) {
+                         printf("Using VAPI event completion\n");
+                         args.prot.comptype = NP_COMP_EVENT;
+                      } else {
+                         fprintf(stderr, "Invalid completion type specified, "
+                                 "please choose one of:\n\n"
+                                 "\tlocal_poll\tWait for last byte of data\t(default)\n"
+                                 "\tvapi_poll\tUse VAPI polling function\n"
+                                 "\tevent\t\tUse VAPI event handling function\n\n");
+                         exit(-1);
                       }
                       break;
 #endif
@@ -295,7 +352,7 @@ main(int argc, char **argv)
 
        /* Allocate large memory pools */
 
-       MyMalloc(&args, MEMSIZE+bufalign);
+       MyMalloc(&args, MEMSIZE+bufalign, args.soffset, args.roffset); 
 
        /* Save buffer addresses */
        
@@ -313,13 +370,14 @@ main(int argc, char **argv)
 
        /* Initialize send buffer pointer */
        
-       args.s_ptr = args.s_buff;
-       args.r_ptr = args.r_buff;
+/* both soffset and roffset should be zero if we don't have any offset stuff, so this should be fine */
+       args.s_ptr = args.s_buff+args.soffset;
+       args.r_ptr = args.r_buff+args.roffset;
    }
 
    if (args.tr ) fprintf(stderr,"Now starting the main loop\n");
 
-       /*Set a starting value for the message size increment. */
+       /* Set a starting value for the message size increment. */
 
    inc = (start > 1) ? start / 2 : 1;
    nq = (start > 1) ? 1 : 0;
@@ -369,14 +427,13 @@ main(int argc, char **argv)
 
            args.bufflen = len + pert;
            if (args.tr)
-               fprintf(stderr,"%3d: %7d bytes %6d times --> ",
-                       n,args.bufflen,nrepeat);
+               	fprintf(stderr,"%3d: %7d bytes %6d times --> ", n,args.bufflen,nrepeat);
 
            if (args.cache) /* Allow cache effects.  We use only one buffer */
            {
                /* Allocate the buffer with room for alignment*/
 
-               MyMalloc(&args, args.bufflen+bufalign);
+               MyMalloc(&args, args.bufflen+bufalign, args.soffset, args.roffset); 
 
                /* Save buffer address */
 
@@ -398,7 +455,9 @@ main(int argc, char **argv)
                 * have data stored in memory.  We are not sure what causes
                 * the difference in performance at this time.
                 */
-               InitBufferData(&args, args.bufflen);
+
+					InitBufferData(&args, args.bufflen, args.soffset, args.roffset);
+
 
                /* Post-alignment initialization */
 
@@ -408,13 +467,15 @@ main(int argc, char **argv)
                 * compatibility with no-cache mode, as this makes the code
                 * simpler) 
                 */
-               args.r_ptr = args.r_buff;
-               args.s_ptr = args.r_buff;
+					/* offsets are zero by default so this saves an #ifdef */
+               args.r_ptr = args.r_buff+args.roffset;
+               args.s_ptr = args.r_buff+args.soffset;
 
            }
            else /* Eliminate cache effects.  We use two distinct buffers */
            {
 
+				/* this isn't truly set up for offsets yet */
                /* Size of an aligned memory block including trailing padding */
 
                len_buf_align = args.bufflen;
@@ -425,12 +486,12 @@ main(int argc, char **argv)
                 *
                 * See NOTE above.
                 */
-               InitBufferData(&args, MEMSIZE);
+               InitBufferData(&args, MEMSIZE, args.soffset, args.roffset); 
                
 
                /* Reset buffer pointers to beginning of pools */
-               args.r_ptr = args.r_buff;
-               args.s_ptr = args.s_buff;
+               args.r_ptr = args.r_buff+args.roffset;
+               args.s_ptr = args.s_buff+args.soffset;
             }
 
             bwdata[n].t = LONGTIME;
@@ -802,6 +863,12 @@ void PrintUsage()
     printf("b: specify TCP send/receive socket buffer sizes\n");
 #endif
 
+#if defined(INFINIBAND)
+    printf("c: specify type of completion <-c type>\n"
+           "   valid types: local_poll, vapi_poll, event\n"
+           "   default: local_poll\n");
+#endif
+    
 #if defined(MPI2)
     printf("g: use get instead of put\n");
     printf("f: do not use fence during timing segment; may not work with\n");
@@ -819,11 +886,12 @@ void PrintUsage()
 
 #if defined(INFINIBAND)
     printf("m: set MTU for Infiniband adapter <-m mtu_size>\n");
-    printf("   Valid sizes: 256, 512, 1024, 2048. 4096. (default 1024)\n");
+    printf("   valid sizes: 256, 512, 1024, 2048, 4096 (default 1024)\n");
 #endif
 
     printf("n: Set a constant value for number of repeats <-n 50>\n");
     printf("o: specify output filename <-o filename>\n");
+    printf("O: specify transmit and optionally receive buffer offsets <-O 1,3>\n");
     printf("p: set the perturbation number <-p 1>\n"
            "   (default = 3 Bytes, set to 0 for no perturbations)\n");
 
@@ -832,8 +900,16 @@ void PrintUsage()
 #endif
 
     printf("s: stream option\n");
-    printf("u: upper bound stop value e.g. <-u 1048576>\n");
 
+#if defined(INFINIBAND)
+    printf("t: specify type of communications <-t type>\n"
+           "   valid types: send_recv, send_recv_with_imm,\n"
+           "                rdma_write, rdma_write_with_imm\n"
+           "   defaul: send_recv\n");
+#endif
+    
+    printf("u: upper bound stop value e.g. <-u 1048576>\n");
+ 
 #if defined(MPI)
     printf("z: receive messages using the 'anysource' flag (source = -1)\n");
 #endif
@@ -886,3 +962,60 @@ void ResetRecvPtr(ArgStruct* p)
 {
   p->r_ptr = p->r_ptr_saved;
 }
+
+/* This is generic across all modules */
+void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
+{
+  memset(p->r_buff, 'a', nbytes+MAX(soffset,roffset));
+
+  /* If using cache mode, then we need to initialize the last byte
+   * to the proper value since the transmitter and receiver are waiting
+   * on different values to determine when the message has completely
+   * arrive.
+   */   
+  if(p->cache)
+
+    p->r_buff[(nbytes+MAX(soffset,roffset))-1] = 'a' + p->tr;
+
+  /* If using no-cache mode, then we have distinct send and receive
+   * buffers, so the send buffer starts out containing different values
+   * from the receive buffer
+   */
+  else
+
+    memset(p->s_buff, 'b', nbytes+soffset);
+}
+#if !defined(INFINIBAND) && !defined(ARMCI) && !defined(LAPI) && !defined(GPSHMEM) && !defined(SHMEM) && !defined(GM)
+
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
+{
+    if((p->r_buff=(char *)malloc(bufflen+MAX(soffset,roffset)))==(char *)NULL)
+    {
+        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+        exit(-1);
+    }
+		/* if pcache==1, use cache, so this line happens only if flushing cache */
+    
+    if(!p->cache) /* Allocate second buffer if limiting cache */
+      if((p->s_buff=(char *)malloc(bufflen+soffset))==(char *)NULL)
+      {
+          fprintf(stderr,"couldn't allocate memory for send buffer\n");
+          exit(-1);
+      }
+}
+
+void FreeBuff(char *buff1, char *buff2)
+{
+  if(buff1 != NULL)
+
+   free(buff1);
+
+
+  if(buff2 != NULL)
+
+   free(buff2);
+}
+
+#endif
+
+

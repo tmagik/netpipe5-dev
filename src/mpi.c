@@ -18,6 +18,7 @@ char *messbuff;
 #define MAXBUFSIZE (10*1024*1024)
 #endif
 
+
 /* Initialize vars in Init() that may be changed by parsing the command args */
 
 void Init(ArgStruct *p, int* pargc, char*** pargv)
@@ -166,34 +167,7 @@ void CleanUp(ArgStruct *p)
    MPI_Finalize();
 }
 
-void FreeBuff(char *buff1, char *buff2)
-{
-  if(buff1 != NULL)
 
-   free(buff1);
-
-
-  if(buff2 != NULL)
-
-   free(buff2);
-}
-
-void MyMalloc(ArgStruct *p, int bufflen)
-{
-    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
-        exit(-1);
-    }
-    
-    if(!p->cache) /* Allocate second buffer if limiting cache */
-      if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
-      {
-          fprintf(stderr,"couldn't allocate memory for send buffer\n");
-          exit(-1);
-      }
-    
-}
 
 void Reset(ArgStruct *p)
 {
@@ -205,10 +179,3 @@ void AfterAlignmentInit(ArgStruct *p)
 
 }
 
-void InitBufferData(ArgStruct *p, int nbytes)
-{
-    memset(p->r_buff, 'a', nbytes);
-
-    if(!p->cache)
-      memset(p->s_buff, 'b', nbytes);
-}

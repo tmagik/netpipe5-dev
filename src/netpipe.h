@@ -69,8 +69,24 @@
                               rcvbufsz; /* Size of TCP receive buffer     */
 #if defined(INFINIBAND)
       IB_mtu_t                ib_mtu;   /* MTU Size for Infiniband HCA    */
+      int                     commtype; /* Communications type            */
+      int                     comptype; /* Completion type                */
 #endif
   };
+
+#if defined(INFINIBAND)
+enum completion_types {
+   NP_COMP_LOCALPOLL,  /* Poll locally on last byte of data     */
+   NP_COMP_VAPIPOLL,   /* Poll using vapi function              */
+   NP_COMP_EVENT       /* Don't poll, use vapi event completion */
+};
+enum communication_types {
+   NP_COMM_SENDRECV,           /* Communication with send/receive            */
+   NP_COMM_SENDRECV_WITH_IMM,  /* Communication with send/receive & imm data */
+   NP_COMM_RDMAWRITE,          /* Communication with rdma write              */
+   NP_COMM_RDMAWRITE_WITH_IMM, /* Communication with rdma write & imm data   */
+};
+#endif
 
 #elif defined(MPI)
   typedef struct protocolstruct ProtocolStruct;
@@ -197,6 +213,7 @@ struct argstruct
     int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
   
     int      reset_conn;    /* Reset connection flag                         */
+		int			soffset,roffset;
 
     /* Now we work with a union of information for protocol dependent stuff  */
     ProtocolStruct prot;
@@ -238,7 +255,9 @@ void FreeBuff(char *buff1, char *buff2);
 
 void CleanUp(ArgStruct *p);
 
-void MyMalloc(ArgStruct *p, int bufflen);
+void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset);
+
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset);
 
 void Reset(ArgStruct *p);
 

@@ -115,21 +115,23 @@ void  CleanUp(ArgStruct *p)
 {
 }
 
-void FreeBuff(char *buff1, char* buff2)
-{
-  if(buff1 != NULL)
-    shfree(buff1);
 
-  if(buff2 != NULL)
-    shfree(buff2);
+void Reset(ArgStruct *p)
+{
+
 }
 
-void MyMalloc(ArgStruct *p, int bufflen)
+void AfterAlignmentInit(ArgStruct *p)
+{
+
+}
+
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
 {
    void* buff1;
    void* buff2;
 
-   if((buff1=(char *)shmalloc(bufflen))==(char *)NULL)
+   if((buff1=(char *)shmalloc(bufflen+MAX(soffset,roffset)))==(char *)NULL)
    {
       fprintf(stderr,"couldn't allocate memory\n");
       exit(-1);
@@ -137,7 +139,7 @@ void MyMalloc(ArgStruct *p, int bufflen)
 
    if(!p->cache)
 
-     if((buff2=(char *)shmalloc(bufflen))==(char *)NULL)
+     if((buff2=(char *)shmalloc(bufflen+soffset))==(char *)NULL)
        {
          fprintf(stderr,"Couldn't allocate memory\n");
          exit(-1);
@@ -151,26 +153,11 @@ void MyMalloc(ArgStruct *p, int bufflen)
    }
 
 }
-
-void Reset(ArgStruct *p)
+void FreeBuff(char *buff1, char* buff2)
 {
+  if(buff1 != NULL)
+    shfree(buff1);
 
-}
-
-void AfterAlignmentInit(ArgStruct *p)
-{
-
-}
-
-void InitBufferData(ArgStruct *p, int nbytes)
-{
-  memset(p->r_buff, 'a', nbytes);
-
-  if(p->cache)
-
-    p->r_buff[p->bufflen-1] = 'a' + p->tr;
-
-  else
-
-    memset(p->s_buff, 'b', nbytes);
+  if(buff2 != NULL)
+    shfree(buff2);
 }

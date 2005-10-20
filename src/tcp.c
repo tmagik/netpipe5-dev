@@ -17,6 +17,7 @@
 #include "mplite.h"
 #endif
 
+
 int doing_reset = 0;
 
 void Init(ArgStruct *p, int* pargc, char*** pargv)
@@ -314,10 +315,20 @@ int establish(ArgStruct *p)
 
   clen = sizeof(p->prot.sin2);
   if(p->tr){
-    if(connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
-               sizeof(p->prot.sin1)) < 0){
-      printf("Client: Cannot Connect! errno=%d\n",errno);
-      exit(-10);
+
+    while( connect(p->commfd, (struct sockaddr *) &(p->prot.sin1),
+                   sizeof(p->prot.sin1)) < 0 ) {
+
+      /* If we are doing a reset and we get a connection refused from
+       * the connect() call, assume that the other node has not yet
+       * gotten to its corresponding accept() call and keep trying until
+       * we have success.
+       */
+      if(!doing_reset || errno != ECONNREFUSED) {
+        printf("Client: Cannot Connect! errno=%d\n",errno);
+        exit(-10);
+      } 
+        
     }
   } else if( p->rcv ) {
     /* SERVER */
@@ -387,41 +398,6 @@ void CleanUp(ArgStruct *p)
    }
 }
 
-void FreeBuff(char *buff1, char *buff2)
-{
-  if(buff1 != NULL)
-
-    free(buff1);
-
-
-  if(buff2 != NULL)
-
-    free(buff2);
-}
-
-void MyMalloc(ArgStruct *p, int bufflen)
-{
-    /* Allocate receive buffer */
-
-    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
-        exit(-1);
-    }
-
-    /* Allocate send buffer */
-
-    if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"Couldn't allocate memory for send buffer\n");
-        exit(-1);
-    }
-
-    /* Save original buffer addresses in case we do alignment */
-
-    p->r_buff_orig = p->r_buff;
-    p->s_buff_orig = p->s_buff;
-}
 
 void Reset(ArgStruct *p)
 {
@@ -449,7 +425,3 @@ void AfterAlignmentInit(ArgStruct *p)
 
 }
 
-void InitBufferData(ArgStruct *p, int nbytes)
-{
-
-}

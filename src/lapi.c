@@ -190,47 +190,12 @@ void  CleanUp(ArgStruct *p)
 	rc = LAPI_Term(t_hndl);   
 }        
 
-void FreeBuff(char *buff1, char *buff2)
-{
-    if(buff1 != NULL)
-      free(buff1);
-
-    if(buff2 != NULL)
-      free(buff2);
-}
-
-void MyMalloc(ArgStruct *p, int bufflen)
-{
-    int rc;
-
-    if((p->r_buff=(char *)malloc(bufflen))==(char *)NULL)
-    {
-        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
-        exit(-1);
-    }
-    rc = LAPI_Address_init(t_hndl,p->r_buff,global_addr);
-
-    if(!p->cache)
-      if((p->s_buff=(char *)malloc(bufflen))==(char *)NULL)
-      {
-          fprintf(stderr,"Couldn't allocate memory for send buffer\n");
-          exit(-1);
-      }
-
-}
 
 void Reset(ArgStruct *p)
 {
 
 }
 
-void InitBufferData(ArgStruct *p, int nbytes)
-{
-    memset(p->r_buff, 'a', nbytes);
-
-    if(!p->cache)
-      memset(p->s_buff, 'b', nbytes);
-}
 
 void AfterAlignmentInit(ArgStruct* p)
 {
@@ -256,3 +221,34 @@ void AfterAlignmentInit(ArgStruct* p)
     /* To clear the t_cntr value */
     rc = LAPI_Waitcntr(t_hndl, &t_cntr, 1, &cur_val);  
 }
+
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
+{
+    int rc;
+
+    if((p->r_buff=(char *)malloc(bufflen+MAX(soffset,roffset)))==(char *)NULL)
+    {
+        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+        exit(-1);
+    }
+    rc = LAPI_Address_init(t_hndl,p->r_buff,global_addr);
+
+    if(!p->cache)
+      if((p->s_buff=(char *)malloc(bufflen+soffset))==(char *)NULL)
+      {
+          fprintf(stderr,"Couldn't allocate memory for send buffer\n");
+          exit(-1);
+      }
+
+}
+
+void FreeBuff(char *buff1, char *buff2)
+{
+    if(buff1 != NULL)
+      free(buff1);
+
+    if(buff2 != NULL)
+      free(buff2);
+}
+
+

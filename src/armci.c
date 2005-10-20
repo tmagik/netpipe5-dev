@@ -345,39 +345,10 @@ void  CleanUp(ArgStruct *p) {
 }
 
 
-void FreeBuff(char *buff1, char* buff2) {
-
-  if(buff1 != NULL)
-    armci_free(buff1);
-
-  if(buff2 != NULL)
-    armci_free(buff2);
-}
-
-
-void MyMalloc(ArgStruct *p, int bufflen) {
-
-    p->r_buff = armci_malloc(bufflen);
-    
-    if(!p->cache)
-      p->s_buff = armci_malloc(bufflen);
-
-}
 
 void Reset(ArgStruct *p)
 {
 
-}
-
-void InitBufferData(ArgStruct *p, int nbytes)
-{
-  memset(p->r_buff, 'a', nbytes);
-
-  if(p->cache)
-    p->r_buff[p->bufflen-1] = 'a' + p->tr;
-
-  if(!p->cache)
-    memset(p->s_buff, 'b', nbytes);
 }
 
 void AfterAlignmentInit(ArgStruct *p)
@@ -395,3 +366,26 @@ void AfterAlignmentInit(ArgStruct *p)
   MPI_Recv(&nbor_r_buff_offset, 1, MPI_INT, p->prot.nbor,0,MPI_COMM_WORLD, &s);
   
 }
+
+void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
+{
+
+/* the MAX() is easier than another if clause and the offsets should be
+   small enough for this to never matter */
+
+    p->r_buff = armci_malloc(bufflen+MAX(soffset,roffset));
+
+    if(!p->cache)
+      p->s_buff = armci_malloc(bufflen+soffset);
+
+}
+void FreeBuff(char *buff1, char* buff2)
+{
+
+  if(buff1 != NULL)
+    armci_free(buff1);
+
+  if(buff2 != NULL)
+    armci_free(buff2);
+}
+
