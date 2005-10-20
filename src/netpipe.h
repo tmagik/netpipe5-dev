@@ -1,3 +1,5 @@
+#define FINAL
+#undef FINAL
 /*****************************************************************************/
 /* "NetPIPE" -- Network Protocol Independent Performance Evaluator.          */
 /* Copyright 1997, 1998 Iowa State University Research Foundation, Inc.      */
@@ -10,32 +12,34 @@
 /*                                                                           */
 /*     * netpipe.h          ---- General include file                        */
 /*****************************************************************************/
-
-/* $Id: netpipe.h,v 1.7 1999/04/27 20:55:57 ghelmer Exp $ */
-
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
-#include <stdlib.h>         /* malloc(3) */
 #include <string.h>
 #include <sys/types.h>
 #include <sys/time.h>       /* struct timeval */
-#ifdef HAVE_GETRUSAGE
-#include <sys/resource.h>
+#include <stdlib.h>         /* malloc(3) */
+
+
+#ifdef FINAL
+  #define  TRIALS             7
+  #define  RUNTM              0.25
+#else
+  #define  TRIALS             3
+  #define  RUNTM              0.10
 #endif
 
-
+#define  MEMSIZE            10000000 
 #define  DEFPORT            5002
-#define  TRIALS             7
 #define  NSAMP              8000
 #define  PERT               3
-#define  LATENCYREPS        100
+#define  LATENCYMAX         2e-4
 #define  LONGTIME           1e99
 #define  CHARSIZE           8
-#define  RUNTM              0.25
 #define  STOPTM             1.0
-#define  MAXINT             2147483647
+#define  MAXINT             10000000
+/*#define  MAXINT             1048576*/
 
 #define     ABS(x)     (((x) < 0)?(-(x)):(x))
 #define     MIN(x,y)   (((x) < (y))?(x):(y))
@@ -43,14 +47,123 @@
 
 /* Need to include the protocol structure header file.                       */
 /* Change this to reflect the protocol                                       */
+
 #if defined(TCP)
-#include "TCP.h"
+  #include <netdb.h>
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <arpa/inet.h>
+  
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct
+  {
+      struct sockaddr_in      sin1,   /* socket structure #1              */
+                              sin2;   /* socket structure #2              */
+      int                     nodelay;  /* Flag for TCP nodelay           */
+      struct hostent          *addr;    /* Address of host                */
+      int                     sndbufsz, /* Size of TCP send buffer        */
+                              rcvbufsz; /* Size of TCP receive buffer     */
+  };
+
 #elif defined(MPI)
-#include "MPI.h"
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct 
+  { 
+    int nbor, iproc;
+    int use_get;
+    int no_fence;
+  };
+
 #elif defined(PVM)
-#include "PVM.h"
+  typedef struct protocolstruct ProtocolStruct;
+
+  struct protocolstruct
+  {
+    int     mytid; /* Keep track of our task id */
+    int     othertid; /* Keep track of the other's task id */
+  };
+
+/*
+  Choose one of the following to determine the type of data
+  encoding for the PVM message passing.
+  
+  DataDefault means that PVM uses XDR encoding which ensures that
+  the data can be packed / unpacked across non-homogeneous machines.
+  
+  If you know that the machines are the same, then you can use DataRaw
+  and save some time (DDT - does not seem to help).
+  
+  DataInPlace means that the data is not copied at pack time, but is
+  copied directly from memory at send time (DDT - this helps a lot).
+
+#define PVMDATA     PvmDataDefault
+#define PVMDATA     PvmDataRaw
+#define PVMDATA     PvmDataInPlace
+*/
+#define PVMDATA     PvmDataInPlace
+
+
+#elif defined(TCGMSG)
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct { long nbor, nid; };
+
+#elif defined(LAPI)
+  #include <lapi.h>
+  lapi_handle_t  t_hndl;
+  lapi_cntr_t    l_cntr;
+  lapi_cntr_t    t_cntr;
+  lapi_cntr_t    c_cntr;
+  lapi_info_t    t_info;  /* LAPI info structure */
+  void           *global_addr[2];
+  void           *global_addr1[2];
+  void           *tgt_addr[2];
+  void           *rpt_addr[2];
+  void           *time_addr[2];
+  int            *pRepeat;
+  
+  typedef struct protocolstruct ProtocolStruct;   
+  struct protocolstruct { int nbor; };
+
+#elif defined(SHMEM)
+  #if defined(GPSHMEM)
+    #include "gpshmem.h"
+  #else
+    #include <mpp/shmem.h>
+  #endif
+  double   *pTime;
+  int      *pNrepeat;
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct
+  {
+          int nbor,ipe;
+          int *flag;
+  };
+
+#elif defined(ARMCI)
+    /* basically same as for GPSHMEM */
+  double   *pTime;
+  int      *pNrepeat;
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct
+  {
+          int nbor,ipe;
+          int *flag;
+  };
+
+
+#elif defined(GM)
+  #include "gm.h"
+  typedef struct protocolstruct ProtocolStruct;
+  struct protocolstruct { int nbor, iproc; };
+
+  struct gm_port *gm_p;
+  unsigned long *ltime, *lrpt;
+  char *sync, *sync1;
+
 #else
-#error "One of TCP, MPI, or PVM must be defined during compilation"
+  #error "One of TCP, MPI, TCGMSG, LAPI, SHMEM or PVM must be defined during compilation"
+
 #endif
 
 
@@ -59,14 +172,31 @@ struct argstruct
 {
     /* This is the common information that is needed for all tests           */
     char     *host;         /* Name of receiving host                        */
+
+#if defined(GM)
+    unsigned short host_id;       /* Host id in routing info of myrinet card       */ 
+#endif
+
     int      servicefd,     /* File descriptor of the network socket         */
              commfd;        /* Communication file descriptor                 */
     short    port;          /* Port used for connection                      */
     char     *buff;         /* Transmitted buffer                            */
     char     *buff1;        /* Transmitted buffer                            */
+
+#if defined(TCGMSG)
+    long      bufflen;      /* Length of transmitted buffer                  */
+    int         tr,         /* Transmit flag                                 */
+              nbuff;        /* Number of buffers to transmit                 */
+#elif defined(GM)
+    unsigned long bufflen;  /* Length of transmitted buffer                  */ 
+    int      tr,            /* Transmit flag                                 */  
+             nbuff;         /* Number of buffers to transmit                 */ 
+#else 
     int      bufflen,       /* Length of transmitted buffer                  */
              tr,            /* Transmit flag                                 */
              nbuff;         /* Number of buffers to transmit                 */
+#endif
+    int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
 
     /* Now we work with a union of information for protocol dependent stuff  */
     ProtocolStruct prot;    /* Structure holding necessary info for TCP      */
@@ -104,4 +234,12 @@ void RecvRepeat(ArgStruct *p, int *rpt);
 
 int Establish(ArgStruct *p);
 
+void FreeBuff(char *buff1, char *buff2);
+
 int  CleanUp(ArgStruct *p);
+
+int MyMalloc(ArgStruct *p, int bufflen);
+
+void mymemset(int *ptr, int c, int n);
+
+void flushcache(int *ptr, int n);

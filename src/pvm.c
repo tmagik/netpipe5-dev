@@ -8,14 +8,14 @@
 /* GNU General Public License along with this program; if not, write to the  */
 /* Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   */
 /*                                                                           */
-/*     * PVM.c              ---- PVM calls source                            */
+/*     * pvm.c              ---- PVM calls source                            */
 /*****************************************************************************/
 #include    "netpipe.h"
 #include    <pvm3.h>
 
 #ifndef lint
 static const char rcsid[] =
-	"$Id: PVM.c,v 1.1 1998/09/24 14:33:13 ghelmer Exp $";
+    "$Id: pvm.c,v 1.1.1.1 2002/09/03 21:16:29 turner Exp $";
 #endif
 
 /**********************************************************************/
@@ -50,56 +50,65 @@ Establish(ArgStruct *p)
     int buffer_id;
 
     /*
-    If we are the transmitting side, go find the other one and send
-    it a message containing our tid. If we are the receiving side,
-    just wait for a message.
+        If we are the transmitting side, go find the other one and send
+        it a message containing our tid. If we are the receiving side,
+        just wait for a message.
     */
     if ( p->tr ) {
 #ifdef DEBUG
-	printf("this is the transmitter\n");
+        printf("this is the transmitter\n");
 #endif
-	tasks_status = pvm_tasks( 0, &ntasks, &taskp );
-	if ( ntasks != 2 ) {
-	    printf("Error, too many processes in parallel machine \n");
-	    printf("Start a clean machine.  n=%d\n", ntasks);
-	    exit(-1);
-	}
+        tasks_status = pvm_tasks( 0, &ntasks, &taskp );
+        if ( ntasks != 2 ) {
+            printf("Error, too many processes in parallel machine \n");
+            printf("Start a clean machine.  n=%d\n", ntasks);
+            exit(-1);
+        }
 
-	/* Since there are two tasks, one is ours the other is the receiver */
-	p->prot.othertid = -1;
-	if ( taskp[0].ti_tid == p->prot.mytid ) {
-	    p->prot.othertid = taskp[1].ti_tid;
-	}
-	if ( taskp[1].ti_tid == p->prot.mytid ) {
-	    p->prot.othertid = taskp[0].ti_tid;
-	}
-	if ( p->prot.othertid == -1 ) {
-	    printf("Error, cannot find other (receiving) task \n");
-	    printf("Id's:  %d %d  \n",taskp[0].ti_tid,taskp[1].ti_tid);
-	}
+            /* Since there are two tasks, one is ours the other is the receiver */
 
-	/* Send the receiver a message.  Tell pvm to keep the channel open */
+        p->prot.othertid = -1;
+        if ( taskp[0].ti_tid == p->prot.mytid ) {
+            p->prot.othertid = taskp[1].ti_tid;
+        }
+        if ( taskp[1].ti_tid == p->prot.mytid ) {
+            p->prot.othertid = taskp[0].ti_tid;
+        }
+        if ( p->prot.othertid == -1 ) {
+            printf("Error, cannot find other (receiving) task \n");
+            printf("Id's:  %d %d  \n",taskp[0].ti_tid,taskp[1].ti_tid);
+        }
+
+            /* Send the receiver a message.  Tell pvm to keep the channel open */
 
 #ifdef DEBUG
-	printf("The receiver tid is %d \n",p->prot.othertid);
+        printf("The receiver tid is %d \n",p->prot.othertid);
 #endif
-	pvm_setopt( PvmRoute, PvmRouteDirect );
-	pvm_initsend( PVMDATA );
-	pvm_pkint( &p->prot.mytid, 1, 1 );
-	pvm_send( p->prot.othertid, 1 );
+
+           /* PVMDATA is defined in netpipe.h, choose wisely (PvmDataInPlace)
+            * Also use PvmRouteDirect, otherwise the data goes through the
+            * pvmd daemons which kills performance.
+            */
+
+        pvm_setopt( PvmRoute, PvmRouteDirect );
+        pvm_initsend( PVMDATA );
+
+        pvm_pkint( &p->prot.mytid, 1, 1 );
+        pvm_send( p->prot.othertid, 1 );
     } else {
 #ifdef DEBUG
-	printf("This is the receiver \n");
+        printf("This is the receiver \n");
 #endif
                 
-	/* Receive any message from any task */
-	buffer_id = pvm_recv(-1, -1);
+            /* Receive any message from any task */
 
-	if ( buffer_id < 0 ) {
-	    printf("Error on receive in receiver\n");
-	    exit(-1);
-	}
-	pvm_upkint( &p->prot.othertid, 1, 1 );
+        buffer_id = pvm_recv(-1, -1);
+
+        if ( buffer_id < 0 ) {
+        printf("Error on receive in receiver\n");
+        exit(-1);
+        }
+        pvm_upkint( &p->prot.othertid, 1, 1 );
     }
 }
 
@@ -204,3 +213,26 @@ int
 CleanUp(ArgStruct *p)
 {
 }
+
+void FreeBuff(char *buff1, char *buff2)
+{
+   free(buff1);
+   free(buff2);
+}
+
+int MyMalloc(ArgStruct *p, int bufflen)
+{
+    int rc;
+    if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+    {
+        fprintf(stderr,"couldn't allocate memory\n");
+        return -1;
+    }
+    if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
+    {
+        fprintf(stderr,"Couldn't allocate memory\n");
+        return -1;
+    }
+    return 0;
+}
+

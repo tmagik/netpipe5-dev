@@ -8,26 +8,25 @@
 /* GNU General Public License along with this program; if not, write to the  */
 /* Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.   */
 /*                                                                           */
-/*     * TCP.c              ---- TCP calls source                            */
-/*     * TCP.h              ---- Include file for TCP calls and data structs */
+/*     * tcp.c              ---- TCP calls source                            */
+/*     * tcp.h              ---- Include file for TCP calls and data structs */
 /*****************************************************************************/
 #include    "netpipe.h"
 
-#ifndef lint
-static const char rcsid[] =
-	"$Id: TCP.c,v 1.8 1999/12/16 14:20:16 ghelmer Exp $";
+#if defined (MPLITE)
+#include "mplite.h"
 #endif
 
 int Setup(ArgStruct *p)
 {
 
  int tr, one = 1;                 /* tr==1 if process is a transmitter */
- short port;
  int sockfd;
  struct sockaddr_in *lsin1, *lsin2;      /* ptr to sockaddr_in in ArgStruct */
  char *host;
  struct hostent *addr;
  struct protoent *proto;
+ int send_size, recv_size, sizeofint = sizeof(int);
 
 
  host = p->host;                           /* copy ptr to hostname */ 
@@ -60,20 +59,28 @@ int Setup(ArgStruct *p)
  /* If requested, set the send and receive buffer sizes */
  if(p->prot.sndbufsz > 0)
  {
-      printf("Send and Receive Buffers set to %d bytes\n", p->prot.sndbufsz);
+/*      printf("Send and Receive buffers set to %d bytes\n", p->prot.sndbufsz);*/
      if(setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
      {
-          printf("NetPIPE: setsockopt: SO_SNDBUF failed! errno=\n", errno);
+          printf("NetPIPE: setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
           exit(556);
      }
      if(setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
                                        sizeof(p->prot.rcvbufsz)) < 0)
      {
-          printf("NetPIPE: setsockopt: SO_RCVBUF failed! errno=\n", errno);
+          printf("NetPIPE: setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
           exit(556);
      }
  }
+ getsockopt(sockfd, SOL_SOCKET, SO_SNDBUF,
+                 (char *) &send_size, (void *) &sizeofint);
+ getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF,
+                 (char *) &recv_size, (void *) &sizeofint);
+ fprintf(stderr,"Send and receive buffers are %d and %d bytes\n",
+         send_size, recv_size);
+ fprintf(stderr, "(A bug in Linux doubles the requested buffer sizes)\n");
+
 
 
  if (tr){                                  /* if client i.e., Sender */
@@ -192,7 +199,7 @@ void RecvData(ArgStruct *p)
 
     bytesLeft = p->bufflen;
     bytesRead = 0;
-    q = p->buff1;
+    q = p->buff;
     while (bytesLeft > 0 &&
 	   (bytesRead = read(p->commfd, q, bytesLeft)) > 0)
       {
@@ -212,17 +219,17 @@ void RecvData(ArgStruct *p)
 
 void SendTime(ArgStruct *p, double *t)
 {
-    unsigned int ltime, ntime;
+    unsigned long ltime, ntime;
 
     /*
       Multiply the number of seconds by 1e6 to get time in microseconds
       and convert value to an unsigned 32-bit integer.
       */
-    ltime = (unsigned int)(*t * 1.e6);
+    ltime = (unsigned long)(*t * 1.e6);
 
     /* Send time in network order */
     ntime = htonl(ltime);
-    if (write(p->commfd, (char *)&ntime, sizeof(unsigned int)) < 0)
+    if (write(p->commfd, (char *)&ntime, sizeof(unsigned long)) < 0)
       {
 	printf("NetPIPE: write failed in SendTime: errno=%d\n", errno);
 	exit(301);
@@ -231,16 +238,16 @@ void SendTime(ArgStruct *p, double *t)
 
 void RecvTime(ArgStruct *p, double *t)
 {
-    unsigned int ltime, ntime;
+    unsigned long ltime, ntime;
     int bytesRead;
 
-    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned int));
+    bytesRead = readFully(p->commfd, (void *)&ntime, sizeof(unsigned long));
     if (bytesRead < 0)
       {
 	printf("NetPIPE: read failed in RecvTime: errno=%d\n", errno);
 	exit(302);
       }
-    else if (bytesRead != sizeof(unsigned int))
+    else if (bytesRead != sizeof(unsigned long))
       {
 	fprintf(stderr, "NetPIPE: partial read in RecvTime of %d bytes\n",
 		bytesRead);
@@ -254,12 +261,12 @@ void RecvTime(ArgStruct *p, double *t)
 
 void SendRepeat(ArgStruct *p, int rpt)
 {
-  unsigned int lrpt, nrpt;
+  unsigned long lrpt, nrpt;
 
   lrpt = rpt;
-  /* Send repeat count as an unsigned 32 bit integer in network order */
+  /* Send repeat count as a long in network order */
   nrpt = htonl(lrpt);
-  if (write(p->commfd, (void *) &nrpt, sizeof(unsigned int)) < 0)
+  if (write(p->commfd, (void *) &nrpt, sizeof(unsigned long)) < 0)
     {
       printf("NetPIPE: write failed in SendRepeat: errno=%d\n", errno);
       exit(304);
@@ -268,16 +275,16 @@ void SendRepeat(ArgStruct *p, int rpt)
 
 void RecvRepeat(ArgStruct *p, int *rpt)
 {
-  unsigned int lrpt, nrpt;
+  unsigned long lrpt, nrpt;
   int bytesRead;
 
-  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(unsigned int));
+  bytesRead = readFully(p->commfd, (void *)&nrpt, sizeof(unsigned long));
   if (bytesRead < 0)
     {
       printf("NetPIPE: read failed in RecvRepeat: errno=%d\n", errno);
       exit(305);
     }
-  else if (bytesRead != sizeof(unsigned int))
+  else if (bytesRead != sizeof(unsigned long))
     {
       fprintf(stderr, "NetPIPE: partial read in RecvRepeat of %d bytes\n",
 	      bytesRead);
@@ -332,39 +339,63 @@ int Establish(ArgStruct *p)
     /* If requested, set the send and receive buffer sizes */
     if(p->prot.sndbufsz > 0)
     {
-      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",
-	     p->prot.sndbufsz);
+/*      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",*/
+/*	     p->prot.sndbufsz);*/
       if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
       {
-	printf("setsockopt: SO_SNDBUF failed! errno=\n", errno);
+	printf("setsockopt: SO_SNDBUF failed! errno=%d\n", errno);
 	exit(556);
       }
       if(setsockopt(p->commfd, SOL_SOCKET, SO_RCVBUF, &(p->prot.rcvbufsz), 
                                        sizeof(p->prot.rcvbufsz)) < 0)
       {
-	printf("setsockopt: SO_RCVBUF failed! errno=\n", errno);
+	printf("setsockopt: SO_RCVBUF failed! errno=%d\n", errno);
 	exit(556);
       }
     }
   } 
+  return 0;    /* Damn SGI compilers want this */
 }
 
 int  CleanUp(ArgStruct *p)
 {
- char *quit="QUIT";
- if (p->tr)
- {
-     write(p->commfd,quit, 5);
-     read(p->commfd, quit, 5);
-     close(p->commfd);
- }
- else
- {
-     read(p->commfd,quit, 5);
-     write(p->commfd,quit,5);
-     close(p->commfd);
-     close(p->servicefd);
- }
+   char *quit="QUIT";
+   if (p->tr)
+   {
+      write(p->commfd,quit, 5);
+      read(p->commfd, quit, 5);
+      close(p->commfd);
+   }
+   else
+   {
+      read(p->commfd,quit, 5);
+      write(p->commfd,quit,5);
+      close(p->commfd);
+      close(p->servicefd);
+   }
+   return 0;    /* Damn SGI compilers want this */
+}
+
+void FreeBuff(char *buff1, char *buff2)
+{
+   free(buff1);
+   free(buff2);
+}
+
+int MyMalloc(ArgStruct *p, int bufflen)
+{
+    int rc;
+    if((p->buff=(char *)malloc(bufflen))==(char *)NULL)
+    {
+        fprintf(stderr,"couldn't allocate memory\n");
+        return -1;
+    }
+    if((p->buff1=(char *)malloc(bufflen))==(char *)NULL)
+    {
+        fprintf(stderr,"Couldn't allocate memory\n");
+        return -1;
+    }
+    return 0;
 }
 
