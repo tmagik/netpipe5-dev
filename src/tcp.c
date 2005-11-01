@@ -38,17 +38,23 @@ void Setup(ArgStruct *p)
  struct hostent *addr;
  struct protoent *proto;
  int send_size, recv_size, sizeofint = sizeof(int);
+ int socket_family = AF_INET;
 
 
  host = p->host;                           /* copy ptr to hostname */ 
 
+ if (p->use_sdp){
+	 printf("Using AF_INET_SDP (27) socket family\n");
+	 socket_family = 27;
+ }
+ 
  lsin1 = &(p->prot.sin1);
  lsin2 = &(p->prot.sin2);
 
  bzero((char *) lsin1, sizeof(*lsin1));
  bzero((char *) lsin2, sizeof(*lsin2));
 
- if ( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+ if ( (sockfd = socket(socket_family, SOCK_STREAM, 0)) < 0){ 
    printf("NetPIPE: can't open stream socket! errno=%d\n", errno);
    exit(-4);
  }

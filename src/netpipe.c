@@ -94,10 +94,13 @@ int main(int argc, char **argv)
 #if ! defined(TCGMSG)
 
     /* Parse the arguments. See Usage for description */
-    while ((c = getopt(argc, argv, "SO:rIiPszgfaB2h:p:o:l:u:b:m:n:t:c:d:D:")) != -1)
+    while ((c = getopt(argc, argv, "ASO:rIiPszgfaB2h:p:o:l:u:b:m:n:t:c:d:D:")) != -1)
     {
         switch(c)
         {
+	    case 'A':
+		      args.use_sdp=1;
+		      break;
             case 'O':
                       strcpy(s2,optarg);
                       strcpy(delim,",");
@@ -1079,7 +1082,10 @@ void PrintUsage()
     printf("   May need to use -a to choose asynchronous communications for MPI/n");
 #endif
 #if defined(TCP) && !defined(INFINIBAND) && !defined(OPENIB)
-    printf("   The maximum test size is limited by the TCP buffer size/n");
+    printf("   The maximum test size is limited by the TCP buffer size\n");
+#endif
+#if defined(TCP)
+    printf("A: Use SDP Address familty (AF_INET_SDP)\n");
 #endif
     printf("\n");
 }
