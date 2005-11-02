@@ -54,7 +54,8 @@ int main(int argc, char **argv)
                 start= 1,       /* Starting value for signature curve        */
                 end=MAXINT,     /* Ending value for signature curve          */
                 streamopt=0,    /* Streaming mode flag                       */
-                reset_connection;/* Reset the connection between trials      */
+                reset_connection,/* Reset the connection between trials      */
+		debug_wait=0;	/* spin and wait for a debugger		     */
    
     ArgStruct   args;           /* Arguments for all the calls               */
 
@@ -84,6 +85,7 @@ int main(int argc, char **argv)
     args.soffset=0; /* default to no offsets */
     args.roffset=0; 
     args.syncflag=0; /* use normal mpi_send */
+    args.use_sdp=0; /* default to no SDP */
 
 
     /* TCGMSG launches NPtcgmsg with a -master master_hostname
@@ -94,7 +96,7 @@ int main(int argc, char **argv)
 #if ! defined(TCGMSG)
 
     /* Parse the arguments. See Usage for description */
-    while ((c = getopt(argc, argv, "ASO:rIiPszgfaB2h:p:o:l:u:b:m:n:t:c:d:D:")) != -1)
+    while ((c = getopt(argc, argv, "AXSO:rIiPszgfaB2h:p:o:l:u:b:m:n:t:c:d:D:")) != -1)
     {
         switch(c)
         {
@@ -347,6 +349,10 @@ int main(int argc, char **argv)
                       printf("Resetting connection after every trial\n");
                       break;
 #endif
+	    case 'X': debug_wait = 1;
+		      printf("Enableing debug wait!\n");
+		      printf("Attach to pid %d and set debug_wait to 0 to conttinue\n", getpid());
+		      break;
 
             default: 
                      PrintUsage(); 
@@ -354,6 +360,9 @@ int main(int argc, char **argv)
        }
    }
 
+   while(debug_wait){
+	   for(i=0;i<10000;i++){};
+   	};
 #endif /* ! defined TCGMSG */
 
 #if defined(OPENIB) || defined(INFINIBAND)
