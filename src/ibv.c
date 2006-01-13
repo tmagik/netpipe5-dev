@@ -337,8 +337,6 @@ int initIB(ArgStruct *p)
   
   LOGPRINTF("Local: lid=%d qp_num=%d Remote: lid=%d qp_num=%d\n",
          lid, qp_hndl->qp_num, d_lid, d_qp_num);
- ib_mthca's QP modify does not set alternate path
-        fields in QP context.
     /* Further setup must be done to finalize the QP 'connection'.
      * First set the State of the qp to initialization by making a seperate
      * ibv_qp_attr* variable, giving it the initial values, and calling
