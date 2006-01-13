@@ -277,10 +277,10 @@ int initIB(ArgStruct *p)
 
 
   /* Placeholder for MR */
-
-  /* Memory Regions have yet to be implemented into the openIB NetPipe
-   * or VAPI/Mellanox NetPipe ports.
-   */
+	/* We dont actually setup the Memory Regions here, instead
+	 * this is done in the 'MyMalloc(..)' helper function.
+	 * You could however, set them up here.
+	 */
 
   /* Create Queue Pair */
     /* To setup a Queue Pair, the following qp initial attributes must be
