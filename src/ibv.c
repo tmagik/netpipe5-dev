@@ -33,35 +33,35 @@ FILE* logfile;
 
 /* Global vars */
 
-static struct ibv_device      *hca;
-static struct ibv_context     *ctx;
-static struct ibv_port_attr    hca_port;
-static int                     port_num;
-static uint16_t                lid;
-static uint16_t                d_lid;
-static struct ibv_pd          *pd_hndl;
-static int                     num_cqe;
-static int                     act_num_cqe;
-static struct ibv_cq          *s_cq_hndl;
-static struct ibv_cq          *r_cq_hndl;
-static struct ibv_mr          *s_mr_hndl;
-static struct ibv_mr          *r_mr_hndl;
-static struct ibv_qp_init_attr qp_init_attr;
-static struct ibv_qp          *qp_hndl;
-static uint32_t                d_qp_num;
-static struct ibv_qp_attr      qp_attr;
-static struct ibv_wc           wc;
-static int                     max_wq=50000;
-static void*                   remote_address;
-static uint32_t                remote_key;
-static volatile int            receive_complete;
-static pthread_t               thread;
+static struct ibv_device      *hca;	/* Infiniband Adapter */
+static struct ibv_context     *ctx;	/* Context for Connections */
+static struct ibv_port_attr    hca_port;/* Attributes of the HCA */
+static int                     port_num;/* IB port to use */
+static uint16_t                lid;	/* Local ID of Adapter */
+static uint16_t                d_lid;	/* Destination ID */
+static struct ibv_pd          *pd_hndl;	/* Protection Domain handle */
+static int                     num_cqe;	/* # Command Queue Entries */
+static int                     act_num_cqe; /* Actual # CQE */
+static struct ibv_cq          *s_cq_hndl; /* Send Command Queue */
+static struct ibv_cq          *r_cq_hndl; /* Recv Command Queue */
+static struct ibv_mr          *s_mr_hndl; /* Send Mem. Region */
+static struct ibv_mr          *r_mr_hndl; /* Recv Mem. Region */
+static struct ibv_qp_init_attr qp_init_attr; /* Initial QP attributes */
+static struct ibv_qp          *qp_hndl;	/* Handle to QP */
+static uint32_t                d_qp_num; /* Dest. QP Number */
+static struct ibv_qp_attr      qp_attr; /* QP Attribute */
+static struct ibv_wc           wc;		/* Work Completion Queue */
+static int                     max_wq=50000;	/* max write queues */	
+static void*                   remote_address;	/* remote address */
+static uint32_t                remote_key;	/* Remote Key */
+static volatile int            receive_complete; /* initialization variable */
+static pthread_t               thread;		/* thread to handle events */
 
 /* Function definitions */
 
 void Init(ArgStruct *p, int* pargc, char*** pargv)
 {
-   /* Set defaults
+   /* Setup Infiniband specific defaults
     */
    p->prot.ib_mtu = IBV_MTU_1024;        /* 1024 Byte MTU                    */
    p->prot.commtype = NP_COMM_RDMAWRITE; /* Use RDMA write communications    */
@@ -69,7 +69,11 @@ void Init(ArgStruct *p, int* pargc, char*** pargv)
    p->tr = 0;                            /* I am not the transmitter         */
    p->rcv = 1;                           /* I am the receiver                */      
 }
-
+/* Setup(..) function is simply used to 'setup' the standard features of 
+ * the netpipe modules.  tcp,netpipe-related stuff.  This does no actual
+ * 'setup' of any InfiniBand stuff, other than passing/storing
+ * the parameters from the command line.
+ */
 void Setup(ArgStruct *p)
 {
 
@@ -78,7 +82,7 @@ void Setup(ArgStruct *p)
  struct sockaddr_in *lsin1, *lsin2;      /* ptr to sockaddr_in in ArgStruct */
  char *host;
  struct hostent *addr;
- struct protoent *proto;
+ struct protoent *proto;		/* protocol entry */
  int send_size, recv_size, sizeofint = sizeof(int);
  struct sigaction sigact1;
  char logfilename[80];
@@ -87,7 +91,7 @@ void Setup(ArgStruct *p)
  if( p->prot.commtype == NP_COMM_RDMAWRITE && 
      p->prot.comptype != NP_COMP_LOCALPOLL ) {
    fprintf(stderr, "Error, RDMA Write may only be used with local polling.\n");
-   fprintf(stderr, "Try using RDMA Write With Immediate Data with vapi polling\n");
+   fprintf(stderr, "Try using RDMA Write With Immediate Data with vapi polling\n");	/* vapi polling? */
    fprintf(stderr, "or event completion\n");
    exit(-1);
  }
@@ -105,17 +109,17 @@ void Setup(ArgStruct *p)
 
  host = p->host;                           /* copy ptr to hostname */ 
 
- lsin1 = &(p->prot.sin1);
- lsin2 = &(p->prot.sin2);
-
+ lsin1 = &(p->prot.sin1);		  /* setup the socket structure #1 */
+ lsin2 = &(p->prot.sin2);		 /* setup socket structure #2 */
+					/* more setup stuff */
  bzero((char *) lsin1, sizeof(*lsin1));
  bzero((char *) lsin2, sizeof(*lsin2));
-
+					/* tcp checks */
  if ( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
    printf("NetPIPE: can't open stream socket! errno=%d\n", errno);
    exit(-4);
  }
-
+					/* another tcp check */
  if(!(proto = getprotobyname("tcp"))){
    printf("NetPIPE: protocol 'tcp' unknown!\n");
    exit(555);
@@ -130,7 +134,7 @@ void Setup(ArgStruct *p)
 
    } else {
       
-     if ((addr = gethostbyname(host)) == NULL){
+     if ((addr = gethostbyname(host)) == NULL){		/* get the hostname */
        printf("NetPIPE: invalid hostname '%s'\n", host);
        exit(-5);
      }
@@ -142,12 +146,12 @@ void Setup(ArgStruct *p)
    lsin1->sin_port = htons(p->port);
 
  } else {                                 /* we are the receiver (server) */
-   
+  
    bzero((char *) lsin1, sizeof(*lsin1));
    lsin1->sin_family      = AF_INET;
    lsin1->sin_addr.s_addr = htonl(INADDR_ANY);
    lsin1->sin_port        = htons(p->port);
-   
+  		 
    if (bind(sockfd, (struct sockaddr *) lsin1, sizeof(*lsin1)) < 0){
      printf("NetPIPE: server: bind on local address failed! errno=%d", errno);
      exit(-6);
@@ -159,23 +163,31 @@ void Setup(ArgStruct *p)
    p->commfd = sockfd;
  else
    p->servicefd = sockfd;
-
+/* ********** This is where the IB specific stuff begins ******** */
  
 
  /* Establish tcp connections */
-
+ /* Connection management for IB is handled over tcp/ip connection */
  establish(p);
 
- /* Initialize Mellanox Infiniband */
+ /* Initialize OpenIB -> Mellanox Infiniband */
 
  if(initIB(p) == -1) {
    CleanUp(p);
    exit(-1);
  }
 }   
-
+/* Event Handler:
+ * Receives events from the EventThread, and notifies other functions
+ * of their arrivals.
+ */
 void event_handler(struct ibv_cq *cq);
 
+
+/* EventThread:
+ * Continuously polls the Command Queue for events, and registers them with
+ * the event_handler(..) function.
+ */
 void *EventThread(void *unused)
 {
   struct ibv_cq *cq;
@@ -189,22 +201,22 @@ void *EventThread(void *unused)
     event_handler(cq);
   }
 }
-
+/* Initialize the actual IB device */
 int initIB(ArgStruct *p)
 {
-  struct dlist *dev_list;
+  struct dlist *dev_list;	/* List in case you have multiple HCA's */
   int ret;
 
-  dev_list = ibv_get_devices();
-  dlist_start(dev_list);
-  hca = dlist_next(dev_list);
-  if (!hca) {
+  dev_list = ibv_get_devices(); /* returns the list of all HCA's in the sys */
+  dlist_start(dev_list);	/* 'start' -> driver loaded?, dev registered? */
+  hca = dlist_next(dev_list);	/* next gives us the first device */
+  if (!hca) {			
     fprintf(stderr, "Couldn't find any InfiniBand devices\n");
     return -1;
   } else {
     LOGPRINTF("Found Infiniband HCA %s\n", ibv_get_device_name(hca));
   }
-
+	/* Get a ibv_context from the ibv_device  */
   ctx = ibv_open_device(hca);
   if (!ctx) {
     fprintf(stderr, "Couldn't create InfiniBand context\n");
@@ -214,22 +226,22 @@ int initIB(ArgStruct *p)
   }
 
   /* Get HCA properties */
-
-  port_num=1;
-  ret = ibv_query_port(ctx, port_num, &hca_port);
+  
+  port_num=1;			/* physical port on the HCA */
+  ret = ibv_query_port(ctx, port_num, &hca_port); /* all info about the port */
   if(ret) {
     fprintf(stderr, "Error querying Infiniband HCA\n");
     return -1;
   } else {
     LOGPRINTF("Queried Infiniband HCA\n");
   }
-  lid = hca_port.lid;
+  lid = hca_port.lid;		/* local id, used to ref back to the device */
   LOGPRINTF("  lid = %d\n", lid);
 
 
   /* Allocate Protection Domain */
-
-  pd_hndl = ibv_alloc_pd(ctx);
+	/* need a Protection domain to handle/register memory over the card */
+  pd_hndl = ibv_alloc_pd(ctx);	
   if(!pd_hndl) {
     fprintf(stderr, "Error allocating PD\n");
     return -1;
@@ -266,9 +278,21 @@ int initIB(ArgStruct *p)
 
   /* Placeholder for MR */
 
+  /* Memory Regions have yet to be implemented into the openIB NetPipe
+   * or VAPI/Mellanox NetPipe ports.
+   */
 
   /* Create Queue Pair */
-
+    /* To setup a Queue Pair, the following qp initial attributes must be
+     * specified and passed to the create_qp(..) function:
+     * max send/recv write requests.  (max_recv/send_wr)
+     * max scatter/gather entries. (max_recv/send_sge)
+     * Command queues to associate the qp with.  (recv/send_cq)
+     * Signalling type:  1-> signal all events.  0-> dont, event handler will
+     *   deal with this.
+     * QP type.  (RC=reliable connection, UC=unreliable.. etc.) defined 
+     *   in the verbs header.
+     */
   qp_init_attr.cap.max_recv_wr    = max_wq; /* Max outstanding WR on RQ      */
   qp_init_attr.cap.max_send_wr    = max_wq; /* Max outstanding WR on SQ      */
   qp_init_attr.cap.max_recv_sge   = 1; /* Max scatter/gather entries on RQ */
@@ -277,7 +301,8 @@ int initIB(ArgStruct *p)
   qp_init_attr.send_cq            = s_cq_hndl; /* CQ handle for SQ         */
   qp_init_attr.sq_sig_all         = 0; /* Signalling type */
   qp_init_attr.qp_type            = IBV_QPT_RC; /* Transmission type         */
-  
+
+  /* ibv_create_qp( ibv_pd *pd, ibv_qp_init_attr * attr) */  
   qp_hndl = ibv_create_qp(pd_hndl, &qp_init_attr);
   if(!qp_hndl) {
     fprintf(stderr, "Error creating Queue Pair\n");
@@ -286,6 +311,10 @@ int initIB(ArgStruct *p)
     LOGPRINTF("Created Queue Pair\n");
   }
 
+    /* Using the tcp connection, exchange necesary data needed to map
+     *  the remote memory:
+     *  (local: lid, qp_hndl->qp_num ), (remote: d_lid, d_qp_num)
+     */
 
   /* Exchange lid and qp_num with other node */
   
@@ -308,17 +337,27 @@ int initIB(ArgStruct *p)
   
   LOGPRINTF("Local: lid=%d qp_num=%d Remote: lid=%d qp_num=%d\n",
          lid, qp_hndl->qp_num, d_lid, d_qp_num);
+ ib_mthca's QP modify does not set alternate path
+        fields in QP context.
+    /* Further setup must be done to finalize the QP 'connection'.
+     * First set the State of the qp to initialization by making a seperate
+     * ibv_qp_attr* variable, giving it the initial values, and calling
+     * ibv_qp_modify(..) to merge these settings into the QP.
+     */
+/* NOTE: According to openIB, ib_mthca's QP modify does not set alternate path
+ *  fields in QP context, so you'll have to do this manually if necessary
+ */
 
-
-  /* Bring up Queue Pair */
+    /* Bring up Queue Pair */
   
   /******* INIT state ******/
 
+  /* qp_attr is seperately allocated per qp/connection */
   qp_attr.qp_state = IBV_QPS_INIT;
   qp_attr.pkey_index = 0;
   qp_attr.port_num = port_num;
   qp_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
-
+  /* merge the qp_attributes into the queue pair */
   ret = ibv_modify_qp(qp_hndl, &qp_attr,
 		      IBV_QP_STATE              |
 		      IBV_QP_PKEY_INDEX         |
@@ -331,6 +370,12 @@ int initIB(ArgStruct *p)
 
   LOGPRINTF("Modified QP to INIT\n");
 
+/* To enable the Queue Pair to finally receive data, it must be 
+ * put into the 'RTR' (Ready-To-Receive) state.  The Queue Pair will NOT
+ * function properly until it has been setup, and manually put through
+ * the init and rtr states.
+ */
+  
   /******* RTR (Ready-To-Receive) state *******/
 
   qp_attr.qp_state = IBV_QPS_RTR;
@@ -346,7 +391,7 @@ int initIB(ArgStruct *p)
   qp_attr.rq_psn = 0;
   qp_attr.pkey_index = 0;
   qp_attr.min_rnr_timer = 5;
-  
+  /* merge these settings into the qp */
   ret = ibv_modify_qp(qp_hndl, &qp_attr,
 		      IBV_QP_STATE              |
 		      IBV_QP_AV                 |
@@ -366,6 +411,8 @@ int initIB(ArgStruct *p)
   /* Sync before going to RTS state */
   Sync(p);
 
+  /* In the same manner, 'enable' sending on the queue pair */
+  
   /******* RTS (Ready-to-Send) state *******/
 
   qp_attr.qp_state = IBV_QPS_RTS;
@@ -391,24 +438,36 @@ int initIB(ArgStruct *p)
   LOGPRINTF("Modified QP to RTS\n");
 
   /* If using event completion, request the initial notification */
+  /* This spawns a seperate thread to do the event handling and
+   * notification.
+   * NOTE:  This may have problems in systems with Weak Memory Consistency
+   * since there are no mutex(*) calls to preserve coherancy??
+   */ 
   if( p->prot.comptype == NP_COMP_EVENT ) {
     if (pthread_create(&thread, NULL, EventThread, NULL)) {
       fprintf(stderr, "Couldn't start event thread\n");
       return -1;
     }
-    ibv_req_notify_cq(r_cq_hndl, 0);
-  }
+    ibv_req_notify_cq(r_cq_hndl, 0);	/* request completion notification  */
+  }					/* for the receive cq.  2nd argument 
+					   specifies if ONLY 'solicited'
+					   completions will be 'noticed' */
+  
  
-  return 0;
+  return 0; /* if we get here, the connection is setup correctly */
 }
 
+
+/* Deallocate everything properly */
 int finalizeIB(ArgStruct *p)
 {
   int ret;
 
   LOGPRINTF("Finalizing IB stuff\n");
-
-  if(qp_hndl) {
+    /* NOTE: This implementation only has created one of each type of queue.
+     * In other implementations it may be necessary to create arrays of 
+     * these queues.  If this is the case, you need to loop and get them all */
+  if(qp_hndl) {	    
     LOGPRINTF("Destroying QP\n");
     ret = ibv_destroy_qp(qp_hndl);
     if(ret) {
@@ -475,15 +534,20 @@ void event_handler(struct ibv_cq *cq)
   int ret;
  
   while(1) {
-     
+     /* int ibv_poll_cq(a,b,c):
+      *	    a: command queue to poll
+      *	    b: max number of completions to return
+      *	    c: array of at least (b) entries of ibv_wc where these
+      *		completion events will be returned.
+      */
     ret = ibv_poll_cq(cq, 1, &wc);
 
      if(ret == 0) {
         LOGPRINTF("Empty completion queue, requesting next notification\n");
-        ibv_req_notify_cq(r_cq_hndl, 0);
+        ibv_req_notify_cq(r_cq_hndl, 0);  /* ... explained in prev line.. */
         return;
      } else if(ret < 0) {
-        fprintf(stderr, "Error in event_handler, polling cq\n");
+        fprintf(stderr, "Error in event_handler (polling cq)\n");
         exit(-1);
      } else if(wc.status != IBV_WC_SUCCESS) {
         fprintf(stderr, "Error in event_handler, on returned work completion "
@@ -509,6 +573,7 @@ void event_handler(struct ibv_cq *cq)
   
 }
 
+/* read the data from the tcp connection */
 static int
 readFully(int fd, void *obuf, int len)
 {
@@ -527,6 +592,8 @@ readFully(int fd, void *obuf, int len)
   return len;
 }
 
+
+/* sync up the tcp connection */
 void Sync(ArgStruct *p)
 {
     char s[] = "SyncMe";
@@ -545,11 +612,14 @@ void Sync(ArgStruct *p)
       }
 }
 
+
+
+
 void PrepareToReceive(ArgStruct *p)
 {
   int                ret;       /* Return code */
   struct ibv_recv_wr rr;        /* Receive request */
-  struct ibv_recv_wr *bad_wr;
+  struct ibv_recv_wr *bad_wr;	/* Handle to any incomplete requests */
   struct ibv_sge     sg_entry;  /* Scatter/Gather list - holds buff addr */
 
   /* We don't need to post a receive if doing RDMA write with local polling */
@@ -557,15 +627,25 @@ void PrepareToReceive(ArgStruct *p)
   if( p->prot.commtype == NP_COMM_RDMAWRITE &&
       p->prot.comptype == NP_COMP_LOCALPOLL )
      return;
-  
-  rr.num_sge = 1;
-  rr.sg_list = &sg_entry;
-  rr.next = NULL;
+  /* setup the receive request, specify which list to use and # entries */
+  rr.num_sge = 1;		    /* # of entries in this list */	
+  rr.sg_list = &sg_entry;	    /* the list of entries */
+  rr.next = NULL;		    /* the next entry (if more than one */
 
-  sg_entry.lkey = r_mr_hndl->lkey;
-  sg_entry.length = p->bufflen;
-  sg_entry.addr = (uintptr_t)p->r_ptr;
+  sg_entry.lkey = r_mr_hndl->lkey;  /* link the entries lkey to our remote mr */
+  sg_entry.length = p->bufflen;	    /* provide a buffer length */
+  sg_entry.addr = (uintptr_t)p->r_ptr; /* address/context of sg_entry */
 
+  /* technically if we have problems, the return is < 0,
+   * but this works as well
+   */
+
+  /* if we get a change in bad_wr value, it is because the Receive request
+   * couldnt be posted to the command queue for some reason.  
+   * (This may be because the queue is full) 
+   * You should probably do something with the bad_wr if your request 
+   * needs to actuall get posted.
+   */
   ret = ibv_post_recv(qp_hndl, &rr, &bad_wr);
   if(ret) {
     fprintf(stderr, "Error posting recv request\n");
@@ -584,15 +664,16 @@ void PrepareToReceive(ArgStruct *p)
   }
 }
 
+/* SendData == Post a 'send' request to the (send)command queue */
 void SendData(ArgStruct *p)
 {
   int                ret;       /* Return code */
   struct ibv_send_wr sr;        /* Send request */
-  struct ibv_send_wr *bad_wr;
+  struct ibv_send_wr *bad_wr;	/* Handle to any incomplete wr returned by ibv*/
   struct ibv_sge     sg_entry;  /* Scatter/Gather list - holds buff addr */
 
   /* Fill in send request struct */
-
+    /* Set the send request's opcode based on run-time options */
   if(p->prot.commtype == NP_COMM_SENDRECV) {
      sr.opcode = IBV_WR_SEND;
      LOGPRINTF("Doing regular send\n");
@@ -600,12 +681,12 @@ void SendData(ArgStruct *p)
      sr.opcode = IBV_WR_SEND_WITH_IMM;
      LOGPRINTF("Doing regular send with imm\n");
   } else if(p->prot.commtype == NP_COMM_RDMAWRITE) {
-     sr.opcode = IBV_WR_RDMA_WRITE;
+     sr.opcode = IBV_WR_RDMA_WRITE;	/* if RDMA, need to give more info */
      sr.wr.rdma.remote_addr = (uintptr_t)(remote_address + (p->s_ptr - p->s_buff));
      sr.wr.rdma.rkey = remote_key;
      LOGPRINTF("Doing RDMA write (raddr=%p)\n", sr.wr.rdma.remote_addr);
   } else if(p->prot.commtype == NP_COMM_RDMAWRITE_WITH_IMM) {
-     sr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+     sr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;	/* more info if RDMA */
      sr.wr.rdma.remote_addr = (uintptr_t)(remote_address + (p->s_ptr - p->s_buff));
      sr.wr.rdma.rkey = remote_key;
      LOGPRINTF("Doing RDMA write with imm (raddr=%p)\n", sr.wr.rdma.remote_addr);
@@ -614,16 +695,21 @@ void SendData(ArgStruct *p)
      exit(-1);
   }
   
-  sr.send_flags = 0; /* This needed due to a bug in Mellanox HW rel a-0 */
+  sr.send_flags = 0;	/* This needed due to a bug in Mellanox HW rel a-0 */
 
-  sr.num_sge = 1;
-  sr.sg_list = &sg_entry;
-  sr.next = NULL;
+  sr.num_sge = 1;		    /* # entries in this request */
+  sr.sg_list = &sg_entry;	    /* the list of other requests */
+  sr.next = NULL;		    /* the next request in the list */
 
-  sg_entry.lkey = s_mr_hndl->lkey; /* Local memory region key */
-  sg_entry.length = p->bufflen;
-  sg_entry.addr = (uintptr_t)p->s_ptr;
+  sg_entry.lkey = s_mr_hndl->lkey;  /* Local memory region key */
+  sg_entry.length = p->bufflen;	   /* buffer's size */
+  sg_entry.addr = (uintptr_t)p->s_ptr;	/* buffer's location */
 
+
+  
+  /* Post the send request to the (send)command queue */
+
+  /* ibv_post_send(...) is handled in same fashion ibv_post_recv(..) */
   ret = ibv_post_send(qp_hndl, &sr, &bad_wr);
   if(ret) {
     fprintf(stderr, "Error posting send request\n");
@@ -633,6 +719,7 @@ void SendData(ArgStruct *p)
 
 }
 
+/* Post a receive request to the (receive)command queue */
 void RecvData(ArgStruct *p)
 {
   int ret;
@@ -664,13 +751,14 @@ void RecvData(ArgStruct *p)
 
   } else if( p->prot.comptype != NP_COMP_EVENT ) {
      
-     /* Poll for receive completion using VAPI poll function */
+     /* Poll for receive completion using poll function */
 
-     LOGPRINTF("Polling completion queue for VAPI work completion\n");
+     LOGPRINTF("Polling completion queue for work completion\n");
      
      ret = 0;
      while(ret == 0)
-        ret = ibv_poll_cq(r_cq_hndl, 1, &wc);
+        ret = ibv_poll_cq(r_cq_hndl, 1, &wc);	/* poll & grab 1 completion */
+     /* ret = # of completions polled by the function */
 
      if(ret < 0) {
         fprintf(stderr, "Error in RecvData, polling for completion\n");
@@ -687,15 +775,15 @@ void RecvData(ArgStruct *p)
      
   } else if( p->prot.comptype == NP_COMP_EVENT ) {
 
-     /* Instead of polling directly on data or VAPI completion queue,
-      * let the VAPI event completion handler set a flag when the receive
+     /* Instead of polling directly on data or the completion queue,
+      * let the event completion handler set a flag when the receive
       * completes, and poll on that instead. Could try using semaphore here
       * as well to eliminate busy polling
       */
 
      LOGPRINTF("Polling receive flag\n");
      
-     while( receive_complete == 0 )
+     while( receive_complete == 0 )	/* this is set by the event hanlr */
      {
         /* BUSY WAIT */
      }
@@ -717,9 +805,9 @@ void Reset(ArgStruct *p)
 
   int                ret;       /* Return code */
   struct ibv_send_wr sr;        /* Send request */
-  struct ibv_send_wr *bad_sr;
+  struct ibv_send_wr *bad_sr;	/* handle to your reqeust if it fails */
   struct ibv_recv_wr rr;        /* Recv request */
-  struct ibv_recv_wr *bad_rr;
+  struct ibv_recv_wr *bad_rr;  /* handle to your request if it fails */
 
   /* If comptype is event, then we'll use event handler to detect receive,
    * so initialize receive_complete flag
@@ -727,7 +815,7 @@ void Reset(ArgStruct *p)
   if(p->prot.comptype == NP_COMP_EVENT) receive_complete = 0;
 
   /* Prepost receive */
-  rr.num_sge = 0;
+  rr.num_sge = 0;	/* there are no entries in this request */
   rr.next = NULL;
 
   LOGPRINTF("Posting recv request in Reset\n");
@@ -744,7 +832,7 @@ void Reset(ArgStruct *p)
   /* Post Send */
   sr.opcode = IBV_WR_SEND;
   sr.send_flags = IBV_SEND_SIGNALED;
-  sr.num_sge = 0;
+  sr.num_sge = 0;	    /* no entires in this request */
   sr.next = NULL;
 
   LOGPRINTF("Posting send request \n");
@@ -762,7 +850,7 @@ void Reset(ArgStruct *p)
   LOGPRINTF("Polling for completion of send request\n");
   ret = 0;
   while(ret == 0)
-    ret = ibv_poll_cq(s_cq_hndl, 1, &wc);
+    ret = ibv_poll_cq(s_cq_hndl, 1, &wc);   /* grab the request */
 
   if(ret < 0) {
     fprintf(stderr, "Error polling CQ for send in Reset\n");
@@ -803,6 +891,8 @@ void Reset(ArgStruct *p)
   LOGPRINTF("Done with reset\n");
 }
 
+
+/* ********** NetPipe stuff ********* */
 void SendTime(ArgStruct *p, double *t)
 {
     uint32_t ltime, ntime;
@@ -845,6 +935,7 @@ void RecvTime(ArgStruct *p, double *t)
     *t = (double)ltime / 1.0e6;
 }
 
+/* in the event of a send failure, re-send (tcp)*/
 void SendRepeat(ArgStruct *p, int rpt)
 {
   uint32_t lrpt, nrpt;
@@ -859,6 +950,8 @@ void SendRepeat(ArgStruct *p, int rpt)
     }
 }
 
+
+/* in the event of a recv failure, resend (tcp)*/
 void RecvRepeat(ArgStruct *p, int *rpt)
 {
   uint32_t lrpt, nrpt;
@@ -881,6 +974,8 @@ void RecvRepeat(ArgStruct *p, int *rpt)
   *rpt = lrpt;
 }
 
+
+/* establish the tcp connection */
 void establish(ArgStruct *p)
 {
  unsigned int clen;
@@ -925,10 +1020,11 @@ void CleanUp(ArgStruct *p)
       close(p->servicefd);
    }
 
-   finalizeIB(p);
+   finalizeIB(p);	/* finally, deallocate all the IB stuff */
 }
 
 
+/* Exchange IB connection info via the tcp connection */
 void AfterAlignmentInit(ArgStruct *p)
 {
   int bytesRead;
@@ -998,7 +1094,7 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
     exit(-1);
   }
 
-  if(p->cache) {
+  if(p->cache) { /* run-time option ? */
 
     /* Infiniband spec says we can register same memory region
      * more than once, so just copy buffer address. We will register
@@ -1007,7 +1103,7 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
     p->s_buff = p->r_buff;
 
   } else {
-
+    
     p->s_buff = malloc(bufflen+soffset);
     if(p->s_buff == NULL) {
       fprintf(stderr, "Error malloc'ing buffer\n");
@@ -1018,8 +1114,22 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
 
   /* Register buffers with Infiniband */
 
+  /* Associate our newly allocated buffers with an IB memory region
+   *   If the reg fails, the function will return NULL for your region ptr
+   *   Else it will return a ptr to an allocated mem region 
+   */
+
+  /* Register the local recv mem region handle:
+   * ibv_mem_register( 
+   *	    local protection domain,
+   *	    remote buffer address,
+   *	    size of the remote buffer,
+   *	    access rights to this memory
+   *	    )
+   */
   r_mr_hndl = ibv_reg_mr(pd_hndl, p->r_buff, bufflen + MAX(soffset, roffset),
 			 IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+
   if(!r_mr_hndl)
         {
     fprintf(stderr, "Error registering recv buffer\n");
@@ -1030,6 +1140,7 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
          LOGPRINTF("Registered Recv Buffer\n");
         }
 
+    /* Register the send mem region handle */
   s_mr_hndl = ibv_reg_mr(pd_hndl, p->s_buff, bufflen+soffset, IBV_ACCESS_LOCAL_WRITE);
   if(!s_mr_hndl) {
     fprintf(stderr, "Error registering send buffer\n");
@@ -1039,6 +1150,12 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
   }
 
 }
+
+
+
+
+
+/* De_register the allocated memory regions before exiting */
 void FreeBuff(char *buff1, char *buff2)
 {
   int ret;
