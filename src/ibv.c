@@ -51,7 +51,7 @@ static struct ibv_qp          *qp_hndl;	/* Handle to QP */
 static uint32_t                d_qp_num; /* Dest. QP Number */
 static struct ibv_qp_attr      qp_attr; /* QP Attribute */
 static struct ibv_wc           wc;		/* Work Completion Queue */
-static int                     max_wq=50000;	/* max write queues */	
+static int                     max_wq=50000;	/* max write queue entries */	
 static void*                   remote_address;	/* remote address */
 static uint32_t                remote_key;	/* Remote Key */
 static volatile int            receive_complete; /* initialization variable */
