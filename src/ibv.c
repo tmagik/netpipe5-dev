@@ -27,6 +27,9 @@ FILE* logfile;
 #define LOGPRINTF(_format, _aa...)
 #endif
 
+/* if this is openib release candidate <= 4  (<= rc4) */
+#define OPENIB_rc4 0
+
 /* Header files needed for Infiniband */
 
 #include    <infiniband/verbs.h>
@@ -204,13 +207,28 @@ void *EventThread(void *unused)
 /* Initialize the actual IB device */
 int initIB(ArgStruct *p)
 {
-  struct dlist *dev_list;	/* List in case you have multiple HCA's */
+/*  struct dlist *dev_list;*/	/* List in case you have multiple HCA's */
   int ret;
+  int num_devices=1;
 
-  dev_list = ibv_get_devices(); /* returns the list of all HCA's in the sys */
-  dlist_start(dev_list);	/* 'start' -> driver loaded?, dev registered? */
-  hca = dlist_next(dev_list);	/* next gives us the first device */
-  if (!hca) {			
+/* 
+ * openib-rc5 breaks back-compatibility with this, if you're using rc4 or lower
+ * you need to define it at the top.
+ */
+
+#if OPENIB_rc4
+    dev_list = ibv_get_devices();   /* returns the list of all HCA's in the sys */
+    dlist_start(dev_list);	    /* 'start' -> driver loaded?, dev registered? */
+    hca = dlist_next(dev_list);	    /* next gives us the first device */
+#else
+    struct ibv_device **hca_list;   /* an array of pointers to discovered IB devs */
+    hca_list = ibv_get_devices(&num_devices);	/* fill the array, NULL on err */
+    if(hca_list == NULL) hca = NULL;	
+    else
+	if(num_devices) hca = hca_list[0];  /* assign our 'main' hca to first dev */
+#endif
+
+  if (!hca || num_devices == 0) {			
     fprintf(stderr, "Couldn't find any InfiniBand devices\n");
     return -1;
   } else {
@@ -225,6 +243,15 @@ int initIB(ArgStruct *p)
     LOGPRINTF("Found Infiniband HCA %s\n", ibv_get_device_name(hca));
   }
 
+  /* free up the other devices in the event we would have multiple ib devices */
+  /* if this isnt done, the device pointers will still be around in space 
+   * somewhere -> bad
+   */
+
+#if OPENIB_rc4<1
+  ibv_free_device_list(hca_list); 
+#endif
+  
   /* Get HCA properties */
   
   port_num=1;			/* physical port on the HCA */
