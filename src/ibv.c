@@ -222,7 +222,7 @@ int initIB(ArgStruct *p)
     hca = dlist_next(dev_list);	    /* next gives us the first device */
 #else
     struct ibv_device **hca_list;   /* an array of pointers to discovered IB devs */
-    hca_list = ibv_get_devices(&num_devices);	/* fill the array, NULL on err */
+    hca_list = ibv_get_device_list(&num_devices);/* fill the array, NULL on err */
     if(hca_list == NULL) hca = NULL;	
     else
 	if(num_devices) hca = hca_list[0];  /* assign our 'main' hca to first dev */
