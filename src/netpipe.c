@@ -13,7 +13,11 @@
 #include "netpipe.h"
 #include <Python.h>
 
-
+/* NOTE:
+ * We need to hack together some sort of clean-up utility because we're dealing
+ * with a language which has a garbage collecter, the interfaces must be
+ * somehow closed prior to exiting!
+ */
     
 static PyObject *
 netpipe_run_nrepeat(Netpipe *self, PyObject *pyargs)
@@ -88,10 +92,31 @@ static PyMethodDef TestMethods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+/* 
+ * Module initialization, this will handle creating the Netpipe object, which
+ * will be exported out to the main python script which is in charge of 
+ * doing all of the runs/iterations.  This will also be the place-holder for
+ * all of the Initialization functions and Startup functions required to get
+ * the program into a state where we can call Send/Recv() functions.
+ */
 PyMODINIT_FUNC
 initNPtcp(void)
 {
+    /* we must do init/startup first, before allowing the module to actually
+     * be instantiated.
+     */
+
+    /* NOTE: Setup() needs an ArgStruct parameter, so we will need to parse
+     * everything before this point!
+     */
+    
+    ArgStruct args;    /* this needs to be from the Netpipe Object! */
+
+    Setup(&args);
+
+    
     (void) Py_InitModule("NPtcp", TestMethods);
+    
 }    
     
     
