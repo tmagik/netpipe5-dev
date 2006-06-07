@@ -1,5 +1,9 @@
 #!/usr/bin/python
 
+import os
+os.system("python setup.py build")
+
+
 #the way this should be is:
 # import Netpipe
 # modules = Netpipe.modules()
