@@ -6,7 +6,7 @@ nptcp = Extension(	'NPtcp',
 			sources = ['src/netpipe.c','src/tcp.c'],
 #			include_dirs = [''],
 			define_macros = [('TCP',None)],
-			extra_compile_args = ['-ggdb'],
+			extra_compile_args = ['-O0', '-ggdb'],
 			)
 
 setup (name = 'NetPIPE',

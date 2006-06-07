@@ -20,16 +20,18 @@
  */
     
 static PyObject *
-netpipe_run_nrepeat(Netpipe *self, PyObject *pyargs)
+netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 {
 	uint32_t microseconds, t0, nrepeat, size, j;
 	double time;
-	ArgStruct *args = self->args;
+	ArgStruct * args;
 
-	if (!PyArg_ParseTuple(pyargs, "i, i", &size, &nrepeat))
+	args = &self->args;
+
+	if (!PyArg_ParseTuple(pyargs, "ii", &size, &nrepeat))
 		return NULL;
 
-	fprintf("size: %d, nrepeats: %d\n", (int)size, (int)nrepeat);
+	fprintf(stderr, "size: %d, nrepeats: %d\n", (int)size, (int)nrepeat);
 	
 	/* buffer(s) should be allocated and preposted (if desired).
 	 * we just call SendData/RecvData, and return timing info
@@ -44,7 +46,7 @@ netpipe_run_nrepeat(Netpipe *self, PyObject *pyargs)
 		/* This should be a function pointer ??*/
 		if (self->integCheck){
 			/* take nanosecond timestamp..  (ns_timestamp) */
-			SetIntegrityData(&args);
+			SetIntegrityData(args);
 			/* ns_timestamp */
 		}
 			
@@ -83,13 +85,25 @@ netpipe_run_nrepeat(Netpipe *self, PyObject *pyargs)
 
 
 
+static PyObject *netpipe_object(PyObject *self)
+{
+	/* need to parse for hostnames */
+	Netpipe *newobj;
+
+	newobj = PyObject_New(Netpipe, &NetpipeType);
+	if (newobj != NULL){
+		Setup(&newobj->args);
+		return (PyObject *)newobj;
+	}
+	return PyErr_NoMemory();
+}
 
 static PyMethodDef TestMethods[] = {
-    {"NPtcp",
-	netpipe_run_nrepeat,
-	METH_VARARGS,
-	"TEST!!"},
-    {NULL, NULL, 0, NULL}
+	{"NPtcp",
+		netpipe_object,
+		METH_VARARGS,
+		"TEST!!"},
+	{NULL, NULL, 0, NULL}
 };
 
 /* 
@@ -102,37 +116,99 @@ static PyMethodDef TestMethods[] = {
 PyMODINIT_FUNC
 initNPtcp(void)
 {
-    /* we must do init/startup first, before allowing the module to actually
-     * be instantiated.
+	PyObject * module;
+	
+	if(PyType_Ready(&NetpipeType) < 0)
+		return;
+	
+	/* we must do init/startup first, before allowing the module to actually
+	 * be instantiated.
+	 */
+
+	/* NOTE: Setup() needs an ArgStruct parameter, so we will need to parse
+	 * everything before this point!
      */
 
-    /* NOTE: Setup() needs an ArgStruct parameter, so we will need to parse
-     * everything before this point!
-     */
+	(void) Py_InitModule("NPtcp", TestMethods);
+}
+
+static void Netpipe_get(Netpipe * self, void *closure)
+{
+	char * op = (char *)closure;
+	PyObject * attr;
+
+	/* um, this is dumb */
+	if (strcmp(op, "streamopt") == 0) {
+		attr = PyString_FromString("foo");
+		return attr;
+	}
+
+	/* if execution gets here, this is an error */
+	PyErr_SetString(PyExc_RuntimeError, "request for unknown Netpipe attribute");
+	return NULL;
+}
+
+static void Netpipe_dealloc(Netpipe *self)
+{
+	fprintf(stderr, "dealloc netpipe object %p", self);
+
+	self->ob_type->tp_free((PyObject *)self);
+}
     
-    ArgStruct args;    /* this needs to be from the Netpipe Object! */
+static PyMethodDef Netpipe_methods[] = {
+	{"run_iters",	(PyCFunction)netpipe_run_iters,
+		METH_VARARGS,	 "Run message size m iters times"},
+	{NULL} /* Sentinel */
+};
 
-    Setup(&args);
+static PyGetSetDef Netpipe_getsets[] = {
+	{"streamopt", (getter)Netpipe_get, NULL, 
+			"Streaming mode flag", "streamopt"},
+	{NULL} /* Sentinel */
+};
 
-    
-    (void) Py_InitModule("NPtcp", TestMethods);
-    
-}    
-    
-    
-
-
-
-
+PyTypeObject NetpipeType = {
+	PyObject_HEAD_INIT(NULL)
+	0,												/* ob_size				*/
+	"Netpipe",										/* tp_name				*/
+	sizeof(Netpipe),								/* tp_basicsize			*/
+	0,												/* tp_itemsize 			*/
+	(destructor)Netpipe_dealloc,					/* tp_dealloc 			*/
+	0,												/* tp_print 			*/
+	0,												/* tp_getattr			*/
+	0,												/* tp_setattr			*/
+	0,												/* tp_compare			*/
+	0,												/* tp_repr				*/
+	0,												/* tp_as_number			*/
+	0,												/* tp_as_sequence		*/
+	0,												/* tp_as_mapping		*/
+	0,												/* tp_hash				*/
+	0,												/* tp_call				*/
+	0,												/* tp_str				*/
+	0,												/* tp_getattro			*/
+	0,												/* tp_setattro			*/
+	0,												/* tp_as_buffer			*/
+	Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,		/* tp_flags				*/
+	"NetPIPE object.",								/* __doc__				*/
+	0,												/* tp_traverse 			*/
+	0,												/* tp_clear 			*/
+	0,												/* tp_richcompare 		*/
+	0,												/* tp_weaklistoffset	*/
+	0,												/* tp_iter				*/
+	0,												/* tp_iternext 			*/
+	Netpipe_methods,								/* tp_methods 			*/
+	0,												/* tp_members 			*/
+	Netpipe_getsets,								/* tp_getset 			*/
+};
 
 
 
 /* Return the current time in seconds, using a double precision number.      */
 double When()
 {
-    struct timeval tp;
-    gettimeofday(&tp, NULL);
-    return ((double) tp.tv_sec + (double) tp.tv_usec * 1e-6);
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	return ((double) tp.tv_sec + (double) tp.tv_usec * 1e-6);
 }
 
 /* 
@@ -144,7 +220,7 @@ void mymemset(int *ptr, int c, int n)
     int i;
 
     for (i = 0; i < n; i++) 
-        *(ptr + i) = c;
+		*(ptr + i) = c;
 }
 
 /* Read the first n integers of the memmory area pointed to by ptr, to flush  
@@ -305,25 +381,30 @@ void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
         exit(-1);
     }
        /* if pcache==1, use cache, so this line happens only if flushing cache */
-    
-    if(!p->cache) /* Allocate second buffer if limiting cache */
-      if((p->s_buff=(char *)malloc(bufflen+soffset))==(char *)NULL)
-      {
-          fprintf(stderr,"couldn't allocate memory for send buffer\n");
-          exit(-1);
-      }
+
+	if(!p->cache) /* Allocate second buffer if limiting cache */
+		if((p->s_buff=(char *)malloc(bufflen+soffset))==(char *)NULL) {
+			fprintf(stderr,"couldn't allocate memory for send buffer\n");
+			exit(-1);
+		}
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
-  if(buff1 != NULL)
+	if(buff1 != NULL)
+		free(buff1);
 
-   free(buff1);
-
-
-  if(buff2 != NULL)
-
-   free(buff2);
+	if(buff2 != NULL)
+		free(buff2);
 }
 
 #endif
+
+/*
+ * Local variables:
+ *  c-indent-level: 4
+ *  c-basic-offset: 4
+ * End:
+ *
+ * vim: ts=4 sts=4 sw=4 noexpandtab
+ */

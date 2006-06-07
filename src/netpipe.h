@@ -263,10 +263,9 @@ struct data
 };
 
 /* Structure to hold the NetPipe-object's data for use on/in tests */
-typedef struct netpipe Netpipe;
-struct netpipe {
+typedef struct {
     PyObject_HEAD;
-    ArgStruct *args;
+    ArgStruct	args;
 	/* common runtime-important variables, etc */
     FILE        *out;           /* Output data file                          */
     char        s[255],s2[255],delim[255],*pstr; /* Generic strings          */
@@ -281,8 +280,8 @@ struct netpipe {
                 asyncReceive,	/* Pre-post a receive buffer?                */
                 bufalign,	/* Boundary to align buffer to              */
                 errFlag,        /* Error occurred in inner testing loop      */
-                nrepeat,        /* Number of time to do the transmission     */
-                nrepeat_const,	/* Set if we are using a constant nrepeat    */
+//             nrepeat,        /* Number of time to do the transmission     */
+//             nrepeat_const,	/* Set if we are using a constant nrepeat    */
                 len,            /* Number of bytes to be transmitted         */
                 inc,	        /* Increment value                           */
                 perturbation,	/* Perturbation value                  */
@@ -297,10 +296,9 @@ struct netpipe {
                 latency;        /* Network message latency                   */
     Data        bwdata[NSAMP];  /* Bandwidth curve data                      */
     int         integCheck;	/* Integrity check                           */
-};
+} Netpipe;
 
-
-
+extern PyTypeObject NetpipeType;
 
 double When();
 
@@ -359,3 +357,13 @@ void PrintUsage();
 int getopt( int argc, char * const argv[], const char *optstring);
 
 void AfterAlignmentInit( ArgStruct *p );
+
+
+/*
+ * Local variables:
+ *  c-indent-level: 4
+ *  c-basic-offset: 4
+ * End:
+ *
+ * vim: ts=4 sts=4 sw=4 noexpandtab
+ */
