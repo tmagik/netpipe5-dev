@@ -13,68 +13,93 @@
 #include "netpipe.h"
 #include <Python.h>
 
+
+    
 static PyObject *
-netpipe_run_nrepeat(PyObject *self, PyObject *pyargs)
+netpipe_run_nrepeat(Netpipe *self, PyObject *pyargs)
 {
 	uint32_t microseconds, t0, nrepeat, size, j;
 	double time;
 	ArgStruct *args = self->args;
 
-	int integCheck = 0;  /* KILL ME */
-
 	if (!PyArg_ParseTuple(pyargs, "i, i", &size, &nrepeat))
 		return NULL;
 
-	fprintf("size: %d, nrepeats: %d\n", size, nrepeat);
+	fprintf("size: %d, nrepeats: %d\n", (int)size, (int)nrepeat);
 	
 	/* buffer(s) should be allocated and preposted (if desired).
 	 * we just call SendData/RecvData, and return timing info
 	 */
 	
-	Sync(&args);    /* Sync to prevent timing artifacts and
+	Sync(args);    /* Sync to prevent timing artifacts and
 			   race condition in armci module */
 
 	
 	for (j = 0; j < nrepeat; j++)
 	{
 		/* This should be a function pointer ??*/
-		if (integCheck){
+		if (self->integCheck){
 			/* take nanosecond timestamp..  (ns_timestamp) */
 			SetIntegrityData(&args);
 			/* ns_timestamp */
 		}
 			
-		if (args.tr){
-			SendData(&args); /* this is what matters */
+		if (args->tr){
+			SendData(args); /* this is what matters */
 			/* ns_timestamp */
-			RecvData(&args); /* Wait for it to come back */
+			RecvData(args); /* Wait for it to come back */
+		} 
 		else{
-			RecvData(&args); /* this is what matters */
+			RecvData(args); /* this is what matters */
 			/* ns_timestamp */
-			SendData(&args); /* Wait for it to come back */
+			SendData(args); /* Wait for it to come back */
 		}
 		/* ns_timestamp */
 		
-		if (integCheck){
-			VerifyIntegrity(&args);
+		if (self->integCheck){
+			VerifyIntegrity(args);
 			/* ns_timestamp */
 		}
 		
-		if(!args.cache){
-			AdvanceRecvPtr(&args, len_buf_align);
-		  	AdvanceSendPtr(&args, len_buf_align);
+		if(!args->cache){
+			AdvanceRecvPtr(args, self->len_buf_align);
+		  	AdvanceSendPtr(args, self->len_buf_align);
 		}
 	}
 
 	/* t is the 1-directional trasmission time */
 
-	microseconds = When() - t0
+	microseconds = When() - self->t0;
 	time = microseconds / nrepeat;
 
 
 	return Py_BuildValue("(i, i, i, d)", 
 			size, nrepeat, microseconds, time);
 }
+
+
+
+
+static PyMethodDef TestMethods[] = {
+    {"NPtcp",
+	netpipe_run_nrepeat,
+	METH_VARARGS,
+	"TEST!!"},
+    {NULL, NULL, 0, NULL}
+};
+
+PyMODINIT_FUNC
+initNPtcp(void)
+{
+    (void) Py_InitModule("NPtcp", TestMethods);
+}    
+    
+    
+
+
+
+
+
 
 
 /* Return the current time in seconds, using a double precision number.      */

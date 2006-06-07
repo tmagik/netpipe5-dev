@@ -22,6 +22,10 @@
 #include <sys/resource.h>   /* getrusage() */
 #include <stdlib.h>         /* malloc(3) */
 #include <unistd.h>         /* getopt, read, write, ... */
+#include <Python.h>	    /* Python interfaces */
+
+
+
 
 #ifdef INFINIBAND
 #include <ib_defs.h> /* ib_mtu_t */
@@ -257,6 +261,46 @@ struct data
     int    bits;
     int    repeat;
 };
+
+/* Structure to hold the NetPipe-object's data for use on/in tests */
+typedef struct netpipe Netpipe;
+struct netpipe {
+    PyObject_HEAD;
+    ArgStruct *args;
+	/* common runtime-important variables, etc */
+    FILE        *out;           /* Output data file                          */
+    char        s[255],s2[255],delim[255],*pstr; /* Generic strings          */
+    int         *memcache;      /* used to flush cache                       */
+
+    int         len_buf_align,  /* meaningful when args.cache is 0. buflen   */
+                                /* rounded up to be divisible by 8           */
+                num_buf_align;  /* meaningful when args.cache is 0. number   */
+                                /* of aligned buffers in memtmp              */
+    int         c,              /* option index                              */
+                i, j, n, nq,    /* Loop indices                              */
+                asyncReceive,	/* Pre-post a receive buffer?                */
+                bufalign,	/* Boundary to align buffer to              */
+                errFlag,        /* Error occurred in inner testing loop      */
+                nrepeat,        /* Number of time to do the transmission     */
+                nrepeat_const,	/* Set if we are using a constant nrepeat    */
+                len,            /* Number of bytes to be transmitted         */
+                inc,	        /* Increment value                           */
+                perturbation,	/* Perturbation value                  */
+                pert,
+                start,		/* Starting value for signature curve        */
+                end,		/* Ending value for signature curve          */
+                streamopt,	/* Streaming mode flag                       */
+                reset_connection,/* Reset the connection between trials      */
+		debug_wait;	/* spin and wait for a debugger		     */
+    double      t, t0, t1, t2,  /* Time variables                            */
+                tlast,          /* Time for the last transmission            */
+                latency;        /* Network message latency                   */
+    Data        bwdata[NSAMP];  /* Bandwidth curve data                      */
+    int         integCheck;	/* Integrity check                           */
+};
+
+
+
 
 double When();
 
