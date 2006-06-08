@@ -19,7 +19,7 @@ import NPtcp
 import time
 
 hostname = 'localhost'
-#dummy = 0
+# 0: normal   1: don't call netpipe.run_iters 2: don't instantiate object
 dummy = 1
 port = 4999
 
@@ -29,8 +29,8 @@ if not pid:
 	sock.bind (('', port))
 	sock.listen(5)
 	channel, details = sock.accept()
-#	if not dummy:
-	netpipe = NPtcp.NPtcp()
+	if dummy < 2:
+		netpipe = NPtcp.NPtcp()
 	# we are receiver
 	n = 0
 	while True:
@@ -57,8 +57,8 @@ else:
 	sock.connect((hostname, port))
 	#this is a HACK so other process executes before we do..
 	time.sleep(0.5)
-#	if not dummy:
-	netpipe = NPtcp.NPtcp(hostname)
+	if dummy < 2:
+		netpipe = NPtcp.NPtcp(hostname)
 	n = 0
 	iters = 1000
 	for size in [1, 2000, 10000]:
