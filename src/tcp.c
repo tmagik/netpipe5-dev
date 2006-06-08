@@ -20,12 +20,12 @@
 
 int doing_reset = 0;
 
-void Init(ArgStruct *p, int* pargc, char*** pargv)
+/* FIXME .. change to object? */
+void Init(Netpipe *self)
 {
-   p->reset_conn = 0; /* Default to not resetting connection */
-   p->prot.sndbufsz = p->prot.rcvbufsz = 0;
-   p->tr = 0;     /* The transmitter will be set using the -h host flag. */
-   p->rcv = 1;
+	ArgStruct *p = &self->args;
+	p->reset_conn = 0; /* Default to not resetting connection */
+	p->prot.sndbufsz = p->prot.rcvbufsz = 0;
 }
 
 void Setup(ArgStruct *p)

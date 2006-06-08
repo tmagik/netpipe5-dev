@@ -239,8 +239,7 @@ struct argstruct
     int      bufflen,       /* Length of transmitted buffer                  */
              upper,         /* Upper limit to bufflen                        */
              tr,rcv,        /* Transmit and Recv flags, or maybe neither     */
-             bidir,         /* Bi-directional flag                           */
-             nbuff;         /* Number of buffers to transmit                 */
+             bidir;         /* Bi-directional flag                           */
 
     int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
     int      preburst;      /* Burst preposted receives before timed runs    */
@@ -276,7 +275,6 @@ typedef struct {
                 num_buf_align;  /* meaningful when args.cache is 0. number   */
                                 /* of aligned buffers in memtmp              */
     int         c,              /* option index                              */
-                i, j, n, nq,    /* Loop indices                              */
                 asyncReceive,	/* Pre-post a receive buffer?                */
                 bufalign,	/* Boundary to align buffer to              */
                 errFlag,        /* Error occurred in inner testing loop      */
@@ -284,25 +282,25 @@ typedef struct {
 //             nrepeat_const,	/* Set if we are using a constant nrepeat    */
                 len,            /* Number of bytes to be transmitted         */
                 inc,	        /* Increment value                           */
-                perturbation,	/* Perturbation value                  */
-                pert,
-                start,		/* Starting value for signature curve        */
-                end,		/* Ending value for signature curve          */
                 streamopt,	/* Streaming mode flag                       */
                 reset_connection,/* Reset the connection between trials      */
 		debug_wait;	/* spin and wait for a debugger		     */
     double      t, t0, t1, t2,  /* Time variables                            */
                 tlast,          /* Time for the last transmission            */
                 latency;        /* Network message latency                   */
-    Data        bwdata[NSAMP];  /* Bandwidth curve data                      */
     int         integCheck;	/* Integrity check                           */
 } Netpipe;
+
+/* only here so we can figure out how much to memset in the Netpipe struct */
+typedef struct {
+	PyObject_HEAD;
+} dummy_pyobject_size;
 
 extern PyTypeObject NetpipeType;
 
 double When();
 
-void Init(ArgStruct *p, int* argc, char*** argv);
+void Init(Netpipe *self);
 
 void Setup(ArgStruct *p);
 

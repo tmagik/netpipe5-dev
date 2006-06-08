@@ -83,15 +83,39 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 			size, nrepeat, microseconds, time);
 }
 
-
-
-static PyObject *netpipe_object(PyObject *self)
+/* Initialize a new netpipe object */
+static PyObject *netpipe_object(PyObject *self, 
+		PyObject *pyargs)
 {
 	/* need to parse for hostnames */
 	Netpipe *newobj;
-
+	
 	newobj = PyObject_New(Netpipe, &NetpipeType);
 	if (newobj != NULL){
+	
+
+		newobj->bufalign = 16*1024; /* 16k buffer alignment */
+		
+		strcpy(newobj->s, "np.out");
+		
+		memset(&newobj->args, 0, sizeof(Netpipe)-sizeof(dummy_pyobject_size));
+
+		if (PyArg_ParseTuple(pyargs, "")){
+			fprintf(stderr, "no args, receiver\n");
+			newobj->args.rcv = 1;
+		} else if (PyArg_ParseTuple(pyargs, "s", &newobj->args.host)) {
+			fprintf(stderr, "transmit, connecting to %s\n",newobj->args.host);
+			newobj->args.tr = 1;
+		} else {
+			return NULL;	/* possible memory leak */
+		}
+		
+		Init(newobj);
+
+		/* only set things that are not 0 */
+		newobj->args.cache = 1; /* Default to use cache */
+		newobj->args.port = DEFPORT; /* default port of 5000 */
+
 		Setup(&newobj->args);
 		return (PyObject *)newobj;
 	}
