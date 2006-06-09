@@ -62,7 +62,7 @@ else:
 		netpipe = NPtcp.NPtcp(hostname)
 	print "NPmodule loaded"
 	n = 0
-	iters = 1000
+	iters = 100000
 	for size in [1, 2000, 10000]:
 		args = (size, iters)
 		txt = pickle.dumps(args)

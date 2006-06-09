@@ -22,9 +22,10 @@
 static PyObject *
 netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 {
-	uint32_t microseconds, t0, nrepeat, size, j;
-	double time;
+	uint32_t nrepeat, size, j;
+	double time, t0, t1; /* do this using 64 bit ints or something */
 	ArgStruct * args;
+	void * buffer = 0;
 
 	args = &self->args;
 
@@ -34,11 +35,29 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 #if DEBUG
 	fprintf(stderr, "size: %d, nrepeats: %d\n", (int)size, (int)nrepeat);
 #endif	
-
-	/* buffer(s) should be allocated and preposted (if desired).
-	 * we just call SendData/RecvData, and return timing info
-	 */
 	
+	/* XXX TODO this is not going to work for !TCP */
+#if 0
+	if (posix_memalign(&buffer, self->bufalign, size)){
+		fprintf(stderr, "couldn't allocate memory\n");
+		return PyErr_NoMemory();
+	}
+#endif
+	buffer = malloc(size);
+	if (!buffer){
+		fprintf(stderr, "couldn't allocate memory\n");
+		return PyErr_NoMemory();
+	}
+	
+	args->bufflen = size;
+	args->s_buff = buffer;
+	args->r_buff = buffer;
+	args->s_ptr = buffer;
+	args->r_ptr = buffer;
+	
+	//InitBufferData(args, args->bufflen, args->soffset, args->roffset);
+	InitBufferData(args, args->bufflen, 0,0);
+
 	Sync(args);    /* Sync to prevent timing artifacts and
 			   race condition in armci module */
 
@@ -77,12 +96,14 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 
 	/* t is the 1-directional trasmission time */
 
-	microseconds = When() - t0;
-	time = microseconds / nrepeat;
+	t1 = When() - t0;
+	time = t1 / nrepeat;
 
+	/* for now, free the buffer.. later be more intelligent */
+	free(buffer);
 
-	return Py_BuildValue("(i, i, i, d)", 
-			size, nrepeat, microseconds, time);
+	return Py_BuildValue("(i, i, d, d)", 
+			size, nrepeat, t1, time);
 }
 
 /* Initialize a new netpipe object */
@@ -405,6 +426,7 @@ void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
 
     memset(p->s_buff, 'b', nbytes+soffset);
 }
+
 #if !defined(OPENIB) && !defined(INFINIBAND) && !defined(ARMCI) && !defined(LAPI) && !defined(GPSHMEM) && !defined(SHMEM) && !defined(GM) 
 
 void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
