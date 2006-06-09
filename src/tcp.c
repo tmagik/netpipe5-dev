@@ -365,6 +365,11 @@ void establish(ArgStruct *p)
       printf("setsockopt: TCP_NODELAY failed! errno=%d\n", errno);
       exit(556);
     }
+    
+    if (setsockopt(p->commfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(int))) {
+      printf("NetPIPE: server: unable to setsockopt -- errno %d\n", errno);
+      exit(557);
+    }
 
     /* If requested, set the send and receive buffer sizes */
     if(p->prot.sndbufsz > 0)

@@ -150,6 +150,13 @@ void Setup(ArgStruct *p)
    lsin1->sin_family      = AF_INET;
    lsin1->sin_addr.s_addr = htonl(INADDR_ANY);
    lsin1->sin_port        = htons(p->port);
+
+   /* re-use socket, common if netpipe aborts due to busted networks */
+   one = 1;
+   if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(int))) {
+       printf("NetPIPE: server: unable to setsockopt -- errno %d\n", errno);
+       exit(-7);
+   }
    
    if (bind(sockfd, (struct sockaddr *) lsin1, sizeof(*lsin1)) < 0){
      printf("NetPIPE: server: bind on local address failed! errno=%d", errno);
