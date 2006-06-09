@@ -12,16 +12,7 @@
 /*                                                                           */
 /*     * netpipe.h          ---- General include file                        */
 /*****************************************************************************/
-#include <ctype.h>
-#include <errno.h>
-#include <signal.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/time.h>       /* struct timeval */
-#include <sys/resource.h>   /* getrusage() */
-#include <stdlib.h>         /* malloc(3) */
-#include <unistd.h>         /* getopt, read, write, ... */
+
 #include <Python.h>	    /* Python interfaces */
 
 
@@ -220,7 +211,7 @@ struct argstruct
 {
     /* This is the common information that is needed for all tests           */
     int      cache;         /* Cache flag, 0 => limit cache, 1=> use cache   */
-    char     *host;         /* Name of receiving host                        */
+    char     host[255];     /* Name of receiving host                        */
 
     int      servicefd,     /* File descriptor of the network socket         */
              commfd;        /* Communication file descriptor                 */
@@ -298,7 +289,7 @@ typedef struct {
 
 extern PyTypeObject NetpipeType;
 
-double When();
+double When(void);
 
 void Init(Netpipe *self);
 
@@ -350,7 +341,7 @@ void SaveRecvPtr(ArgStruct* p);
 
 void ResetRecvPtr(ArgStruct* p);
 
-void PrintUsage();
+void PrintUsage(void);
 
 int getopt( int argc, char * const argv[], const char *optstring);
 

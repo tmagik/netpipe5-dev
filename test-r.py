@@ -13,4 +13,5 @@ import NPtcp
 n = NPtcp.NPtcp()
 print n
 print "--.. n.run_iters(1,1)"
-n.run_iters(1,1)
+r = n.run_iters(1,1)
+print "r: ", r

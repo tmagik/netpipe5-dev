@@ -22,7 +22,7 @@
 static PyObject *
 netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 {
-	uint32_t microseconds, t0, nrepeat, size, j;
+	uint32_t microseconds, nrepeat, size, j;
 	double time;
 	ArgStruct * args;
 
@@ -31,8 +31,10 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	if (!PyArg_ParseTuple(pyargs, "ii", &size, &nrepeat))
 		return NULL;
 
+#if DEBUG
 	fprintf(stderr, "size: %d, nrepeats: %d\n", (int)size, (int)nrepeat);
-	
+#endif	
+
 	/* buffer(s) should be allocated and preposted (if desired).
 	 * we just call SendData/RecvData, and return timing info
 	 */
@@ -85,10 +87,16 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 
 /* Initialize a new netpipe object */
 static PyObject *netpipe_object(PyObject *self, 
-		PyObject *pyargs)
+		PyObject *pyargs, PyObject *kw)
 {
 	/* need to parse for hostnames */
 	Netpipe *newobj;
+	char * temp = NULL;
+
+	static char *kwlist[] = {"host", NULL};
+	
+	if (!PyArg_ParseTupleAndKeywords(pyargs, kw, "|s", kwlist, &temp))
+		return NULL;
 	
 	newobj = PyObject_New(Netpipe, &NetpipeType);
 	if (newobj != NULL){
@@ -100,14 +108,16 @@ static PyObject *netpipe_object(PyObject *self,
 		
 		memset(&newobj->args, 0, sizeof(Netpipe)-sizeof(dummy_pyobject_size));
 
-		if (PyArg_ParseTuple(pyargs, "")){
+		if (!temp){
 			fprintf(stderr, "no args, receiver\n");
 			newobj->args.rcv = 1;
-		} else if (PyArg_ParseTuple(pyargs, "s", &newobj->args.host)) {
+		} else {
+			if(strlen(temp) > 254){
+				fprintf(stderr, "XXXXXX you're going to die, host string too big\n");
+			}
+			strncpy(&newobj->args.host, temp, 255);
 			fprintf(stderr, "transmit, connecting to %s\n",newobj->args.host);
 			newobj->args.tr = 1;
-		} else {
-			return NULL;	/* possible memory leak */
 		}
 		
 		Init(newobj);
@@ -140,7 +150,7 @@ static PyMethodDef TestMethods[] = {
 PyMODINIT_FUNC
 initNPtcp(void)
 {
-	PyObject * module;
+	//PyObject * module;
 	
 	if(PyType_Ready(&NetpipeType) < 0)
 		return;
@@ -156,7 +166,7 @@ initNPtcp(void)
 	(void) Py_InitModule("NPtcp", TestMethods);
 }
 
-static void Netpipe_get(Netpipe * self, void *closure)
+static PyObject * Netpipe_get(Netpipe * self, void *closure)
 {
 	char * op = (char *)closure;
 	PyObject * attr;

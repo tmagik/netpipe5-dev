@@ -20,8 +20,8 @@ import time
 
 hostname = 'localhost'
 # 0: normal   1: don't call netpipe.run_iters 2: don't instantiate object
-dummy = 1
-port = 4999
+dummy = 0
+port = 5000
 
 pid = os.fork()
 if not pid:
@@ -46,7 +46,7 @@ if not pid:
 		print "R: %3d: %7d bytes %6d times --> " % (n, size, iters)
 		if not dummy:
 			r = netpipe.run_iters(size, iters)
-			print "R:   \----> %s" % r
+			print "R:   \----> ", r
 
 	channel.close()
 	sys.exit(0)
@@ -59,11 +59,11 @@ else:
 	time.sleep(0.5)
 	if dummy < 2:
 		netpipe = NPtcp.NPtcp(hostname)
+	print "NPmodule loaded"
 	n = 0
 	iters = 1000
 	for size in [1, 2000, 10000]:
 		args = (size, iters)
-		print args
 		txt = pickle.dumps(args)
 		sock.send( txt )
 		args2 = pickle.loads(sock.recv(1024))
@@ -75,7 +75,7 @@ else:
 		print "T: %3d: %7d bytes %6d times --> " % (n, size, iters)
 		if not dummy: 
 			r = netpipe.run_iters(size, iters)
-			print "T:   \----> %s" % r
+			print "T:   \----> ", r
 
 	sock.send( pickle.dumps (None))
 

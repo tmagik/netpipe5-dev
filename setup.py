@@ -7,6 +7,7 @@ import distutils.core
 nptcp = distutils.core.Extension(	
 			'NPtcp',
 			sources = ['src/netpipe.c','src/tcp.c'],
+			depends = ['src/netpipe.h'],
 #			include_dirs = [''],
 			define_macros = [('TCP',None)],
 #			extra_compile_args = ['-O0', '-ggdb'],
