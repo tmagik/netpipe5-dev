@@ -129,10 +129,15 @@ void Setup(ArgStruct *p)
    lsin1->sin_family      = AF_INET;
    lsin1->sin_addr.s_addr = htonl(INADDR_ANY);
    lsin1->sin_port        = htons(p->port);
+
+   if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(int))) {
+     printf("NetPIPE: server: unable to setsockopt -- errno %d\n", errno);
+     exit(-6);
+   }
    
    if (bind(sockfd, (struct sockaddr *) lsin1, sizeof(*lsin1)) < 0){
      printf("NetPIPE: server: bind on local address failed! errno=%d", errno);
-     exit(-6);
+     exit(-7);
    }
 
    p->servicefd = sockfd;
@@ -366,11 +371,6 @@ void establish(ArgStruct *p)
       exit(556);
     }
     
-    if (setsockopt(p->commfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(int))) {
-      printf("NetPIPE: server: unable to setsockopt -- errno %d\n", errno);
-      exit(557);
-    }
-
     /* If requested, set the send and receive buffer sizes */
     if(p->prot.sndbufsz > 0)
     {
