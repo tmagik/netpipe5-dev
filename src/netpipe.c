@@ -42,7 +42,7 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	Sync(args);    /* Sync to prevent timing artifacts and
 			   race condition in armci module */
 
-	t0 = When()	
+	t0 = When();
 	for (j = 0; j < nrepeat; j++)
 	{
 		/* This should be a function pointer ??*/
@@ -58,9 +58,9 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 			RecvData(args); /* Wait for it to come back */
 		} 
 		else{
-			RecvData(args); /* this is what matters */
-			/* ns_timestamp */
-			SendData(args); /* Wait for it to come back */
+			RecvData(args); /* Wait for data */
+			/* ns_timestamp */ 
+			SendData(args); /* bounce it back */
 		}
 		/* ns_timestamp */
 		
