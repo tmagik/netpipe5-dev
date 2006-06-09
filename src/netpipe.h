@@ -12,16 +12,11 @@
 /*                                                                           */
 /*     * netpipe.h          ---- General include file                        */
 /*****************************************************************************/
-#include <ctype.h>
-#include <errno.h>
-#include <signal.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/time.h>       /* struct timeval */
-#include <sys/resource.h>   /* getrusage() */
-#include <stdlib.h>         /* malloc(3) */
-#include <unistd.h>         /* getopt, read, write, ... */
+
+#include <Python.h>	    /* Python interfaces */
+
+
+
 
 #ifdef INFINIBAND
 #include <ib_defs.h> /* ib_mtu_t */
@@ -216,7 +211,7 @@ struct argstruct
 {
     /* This is the common information that is needed for all tests           */
     int      cache;         /* Cache flag, 0 => limit cache, 1=> use cache   */
-    char     *host;         /* Name of receiving host                        */
+    char     host[255];     /* Name of receiving host                        */
 
     int      servicefd,     /* File descriptor of the network socket         */
              commfd;        /* Communication file descriptor                 */
@@ -235,8 +230,7 @@ struct argstruct
     int      bufflen,       /* Length of transmitted buffer                  */
              upper,         /* Upper limit to bufflen                        */
              tr,rcv,        /* Transmit and Recv flags, or maybe neither     */
-             bidir,         /* Bi-directional flag                           */
-             nbuff;         /* Number of buffers to transmit                 */
+             bidir;         /* Bi-directional flag                           */
 
     int      source_node;   /* Set to -1 (MPI_ANY_SOURCE) if -z specified    */
     int      preburst;      /* Burst preposted receives before timed runs    */
@@ -258,9 +252,46 @@ struct data
     int    repeat;
 };
 
-double When();
+/* Structure to hold the NetPipe-object's data for use on/in tests */
+typedef struct {
+    PyObject_HEAD;
+    ArgStruct	args;
+	/* common runtime-important variables, etc */
+    FILE        *out;           /* Output data file                          */
+    char        s[255],s2[255],delim[255],*pstr; /* Generic strings          */
+    int         *memcache;      /* used to flush cache                       */
 
-void Init(ArgStruct *p, int* argc, char*** argv);
+    int         len_buf_align,  /* meaningful when args.cache is 0. buflen   */
+                                /* rounded up to be divisible by 8           */
+                num_buf_align;  /* meaningful when args.cache is 0. number   */
+                                /* of aligned buffers in memtmp              */
+    int         c,              /* option index                              */
+                asyncReceive,	/* Pre-post a receive buffer?                */
+                bufalign,	/* Boundary to align buffer to              */
+                errFlag,        /* Error occurred in inner testing loop      */
+//             nrepeat,        /* Number of time to do the transmission     */
+//             nrepeat_const,	/* Set if we are using a constant nrepeat    */
+                len,            /* Number of bytes to be transmitted         */
+                inc,	        /* Increment value                           */
+                streamopt,	/* Streaming mode flag                       */
+                reset_connection,/* Reset the connection between trials      */
+		debug_wait;	/* spin and wait for a debugger		     */
+    double      t, t0, t1, t2,  /* Time variables                            */
+                tlast,          /* Time for the last transmission            */
+                latency;        /* Network message latency                   */
+    int         integCheck;	/* Integrity check                           */
+} Netpipe;
+
+/* only here so we can figure out how much to memset in the Netpipe struct */
+typedef struct {
+	PyObject_HEAD;
+} dummy_pyobject_size;
+
+extern PyTypeObject NetpipeType;
+
+double When(void);
+
+void Init(Netpipe *self);
 
 void Setup(ArgStruct *p);
 
@@ -310,8 +341,18 @@ void SaveRecvPtr(ArgStruct* p);
 
 void ResetRecvPtr(ArgStruct* p);
 
-void PrintUsage();
+void PrintUsage(void);
 
 int getopt( int argc, char * const argv[], const char *optstring);
 
 void AfterAlignmentInit( ArgStruct *p );
+
+
+/*
+ * Local variables:
+ *  c-indent-level: 4
+ *  c-basic-offset: 4
+ * End:
+ *
+ * vim: ts=4 sts=4 sw=4 noexpandtab
+ */
