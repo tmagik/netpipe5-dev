@@ -32,7 +32,6 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	if (!PyArg_ParseTuple(pyargs, "ii", &size, &nrepeat))
 		return NULL;
 
-#define DEBUG 1
 	bytes = size / 8;
 	if (size % 8) bytes = bytes + 1;
 	
@@ -161,7 +160,7 @@ static PyObject *netpipe_object(PyObject *self,
 static PyMethodDef TestMethods[] = {
 	{"NPtcp",
 		netpipe_object,
-		METH_VARARGS,
+		METH_VARARGS | METH_KEYWORDS,
 		"TEST!!"},
 	{NULL, NULL, 0, NULL}
 };
