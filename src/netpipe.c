@@ -22,7 +22,7 @@
 static PyObject *
 netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 {
-	uint32_t nrepeat, size, j;
+	uint32_t nrepeat, size, j, bytes;
 	double time, t0, t1; /* do this using 64 bit ints or something */
 	ArgStruct * args;
 	void * buffer = 0;
@@ -32,8 +32,12 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	if (!PyArg_ParseTuple(pyargs, "ii", &size, &nrepeat))
 		return NULL;
 
+#define DEBUG 1
+	bytes = size / 8;
+	if (size % 8) bytes = bytes + 1;
+	
 #if DEBUG
-	fprintf(stderr, "size: %d, nrepeats: %d\n", (int)size, (int)nrepeat);
+	fprintf(stderr, "size: %d, bytes: %d, nrepeats: %d\n", (int)size, (int)bytes, (int)nrepeat);
 #endif	
 	
 	/* XXX TODO this is not going to work for !TCP */
@@ -43,6 +47,7 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 		return PyErr_NoMemory();
 	}
 #endif
+
 	buffer = malloc(size);
 	if (!buffer){
 		fprintf(stderr, "couldn't allocate memory\n");

@@ -44,7 +44,7 @@ if not pid:
 
 		n = n + 1
 		(size, iters) = args
-		print "R: %3d: %7d bytes %6d times --> " % (n, size, iters)
+		print "R: %3d: %7d bits %6d times --> " % (n, size, iters)
 		if not dummy:
 			r = netpipe.run_iters(size, iters)
 			print "R:   \----> ", r
@@ -63,7 +63,7 @@ else:
 	print "NPmodule loaded"
 	n = 0
 	iters = 100000
-	for size in [1, 2000, 10000]:
+	for size in range(1,32):
 		args = (size, iters)
 		txt = pickle.dumps(args)
 		sock.send( txt )
@@ -73,7 +73,7 @@ else:
 			sock.send( pickle.dumps (None))
 			sys.exit(1);
 		n = n + 1
-		print "T: %3d: %7d bytes %6d times --> " % (n, size, iters)
+		print "T: %3d: %7d bits %6d times --> " % (n, size, iters)
 		if not dummy: 
 			r = netpipe.run_iters(size, iters)
 			print "T:   \----> ", r
