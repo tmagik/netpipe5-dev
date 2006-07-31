@@ -18,14 +18,16 @@
  * with a language which has a garbage collecter, the interfaces must be
  * somehow closed prior to exiting!
  */
-    
+
+static void * buffer = NULL;
+static void * buffer2 = NULL;
+
 static PyObject *
 netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 {
 	uint32_t nrepeat, size, j, bytes;
 	double time, t0, t1; /* do this using 64 bit ints or something */
 	ArgStruct * args;
-	void * buffer = 0;
 
 	args = &self->args;
 
@@ -41,19 +43,27 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	
 	/* XXX TODO this is not going to work for !TCP */
 #if 0
-	if (posix_memalign(&buffer, self->bufalign, size)){
-		fprintf(stderr, "couldn't allocate memory\n");
-		return PyErr_NoMemory();
+	int r;
+	if (!buffer){
+		r = posix_memalign(&buffer, self->bufalign, bytes);
+		if (r){
+			fprintf(stderr, "couldn't allocate memory, posix_memalign returned %d\n", r);
+			return PyErr_NoMemory();
+		}
 	}
-#endif
+	fprintf(stderr, "address is %p\n", buffer);
 
-	buffer = malloc(size);
+#else
+
+	buffer = malloc(bytes);
 	if (!buffer){
 		fprintf(stderr, "couldn't allocate memory\n");
 		return PyErr_NoMemory();
 	}
+	fprintf(stderr, "address is %p\n", buffer);	
+#endif
 	
-	args->bufflen = size;
+	args->bufflen = bytes;
 	args->s_buff = buffer;
 	args->r_buff = buffer;
 	args->s_ptr = buffer;
@@ -68,13 +78,14 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	t0 = When();
 	for (j = 0; j < nrepeat; j++)
 	{
+#if 0
 		/* This should be a function pointer ??*/
 		if (self->integCheck){
 			/* take nanosecond timestamp..  (ns_timestamp) */
 			SetIntegrityData(args);
 			/* ns_timestamp */
 		}
-			
+#endif		
 		if (args->tr){
 			SendData(args); /* this is what matters */
 			/* ns_timestamp */
@@ -86,7 +97,7 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 			SendData(args); /* bounce it back */
 		}
 		/* ns_timestamp */
-		
+#if 0		
 		if (self->integCheck){
 			VerifyIntegrity(args);
 			/* ns_timestamp */
@@ -96,6 +107,7 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 			AdvanceRecvPtr(args, self->len_buf_align);
 		  	AdvanceSendPtr(args, self->len_buf_align);
 		}
+#endif
 	}
 
 	/* t is the 1-directional trasmission time */
@@ -105,7 +117,7 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 
 	/* for now, free the buffer.. later be more intelligent */
 	free(buffer);
-
+	
 	return Py_BuildValue("(i, i, d, d)", 
 			size, nrepeat, t1, time);
 }
@@ -126,12 +138,11 @@ static PyObject *netpipe_object(PyObject *self,
 	newobj = PyObject_New(Netpipe, &NetpipeType);
 	if (newobj != NULL){
 	
+		memset(&newobj->args, 0, sizeof(Netpipe)-sizeof(dummy_pyobject_size));
 
 		newobj->bufalign = 16*1024; /* 16k buffer alignment */
 		
 		strcpy(newobj->s, "np.out");
-		
-		memset(&newobj->args, 0, sizeof(Netpipe)-sizeof(dummy_pyobject_size));
 
 		if (!temp){
 			fprintf(stderr, "no args, receiver\n");

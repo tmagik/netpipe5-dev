@@ -374,8 +374,8 @@ void establish(ArgStruct *p)
     /* If requested, set the send and receive buffer sizes */
     if(p->prot.sndbufsz > 0)
     {
-/*      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",*/
-/*           p->prot.sndbufsz);*/
+      printf("Send and Receive Buffers on accepted socket set to %d bytes\n",
+           p->prot.sndbufsz);
       if(setsockopt(p->commfd, SOL_SOCKET, SO_SNDBUF, &(p->prot.sndbufsz), 
                                        sizeof(p->prot.sndbufsz)) < 0)
       {

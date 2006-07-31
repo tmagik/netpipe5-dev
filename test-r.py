@@ -10,8 +10,14 @@
 
 import NPtcp
 
+size = 8000000
+iters = 10
+
 n = NPtcp.NPtcp()
 print n
-print "--.. n.run_iters(1,1)"
-r = n.run_iters(1000000,1000)
-print "r: ", r
+for i in range(1,5):
+	print "--.. n.run_iters(%d,%d)" % (size, iters)
+	r = n.run_iters(size,iters)
+	print "r: ", r
+	bps = size*2/r[3]
+	print "receiver: bits per sec: %f * 10e6 -- %f * 1024*1024" % (bps/1000000, bps/(1024*1024))
