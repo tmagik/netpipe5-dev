@@ -60,7 +60,7 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 		fprintf(stderr, "couldn't allocate memory\n");
 		return PyErr_NoMemory();
 	}
-	fprintf(stderr, "address is %p\n", buffer);	
+/*	fprintf(stderr, "address is %p\n", buffer);	 */
 #endif
 	
 	args->bufflen = bytes;
