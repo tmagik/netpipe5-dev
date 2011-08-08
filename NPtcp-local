@@ -12,15 +12,6 @@ if build:
 	sys.path.append ("%s/build/lib.%s-%s" % (os.getcwd(), platform, version))
 	print sys.path
 
-
-#the way this should be is:
-# import Netpipe
-# modules = Netpipe.modules()
-# .. returns list of modules
-# hostlist = ['localhost', 'localhost']
-# n = Netpipe.tcp(hostlist)  # instantiate TCP module
-# n.run_iters(1,1)
-
 import socket
 import pickle
 import sys
@@ -102,8 +93,14 @@ def iterFunc(tlast, oldsize, newsize):
 	#iters = max(int((RUNTM*bw)/(size)), TRIALS)	
 	return max(iters, TRIALS)
 
-fileName = sys.argv[1]
+try:
+	fileName = sys.argv[1]
+except IndexError:
+	print "Usage: %s [output data filename (np.out)]" % sys.argv[0]
+	sys.exit(1)
+
 f = file(fileName,'w')
+
 pid = os.fork()
 if not pid:
 	sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
@@ -206,5 +203,5 @@ else:
 #  c-basic-offset: 4
 # End:
 #
-# vim: ts=4 sts=4 sw=4 noexpandtab
+# vim: ts=4 sts=4 sw=4 noexpandtab 
 
