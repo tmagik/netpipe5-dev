@@ -97,7 +97,7 @@ enum communication_types {
   typedef struct protocolstruct ProtocolStruct;
   struct protocolstruct 
   { 
-    int nbor, iproc;
+    int nbor, iproc, nprocs;
     int use_get;
     int no_fence;
   };
@@ -291,7 +291,7 @@ extern PyTypeObject NetpipeType;
 
 double When(void);
 
-void Init(Netpipe *self);
+void Init(Netpipe *self, int* argc, char*** argv);
 
 void Setup(ArgStruct *p);
 
@@ -309,9 +309,9 @@ void SendTime(ArgStruct *p, double *t);
 
 void RecvTime(ArgStruct *p, double *t);
 
-void SendRepeat(ArgStruct *p, int rpt);
+void SendRepeat(ArgStruct *p, uint32_t rpt);
 
-void RecvRepeat(ArgStruct *p, int *rpt);
+void RecvRepeat(ArgStruct *p, uint32_t *rpt);
 
 void FreeBuff(char *buff1, char *buff2);
 

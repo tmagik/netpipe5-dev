@@ -103,38 +103,20 @@ f = file(fileName,'w')
 
 pid = os.fork()
 if not pid:
-	sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-	sock.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1 )
-	sock.bind (('', port))
-	sock.listen(5)
-	channel, details = sock.accept()
-	if dummy < 2:
-		netpipe = NPtcp.NPtcp()
-	# we are receiver
+	#print "instantiate receiver"
+	netpipe = NPtcp.NPtcp()
 	n = 0
 	while True:
-		txt = channel.recv(1024)
-		args = pickle.loads(txt)
-		channel.send(txt) #send it back
-		if args == None:
-			print "Receive thread exiting"
-			break	# go bye-bye
-
-		n = n + 1
-		(size, iters) = args
-		if not dummy:  
-			r = netpipe.run_iters(size, iters)
-
-	channel.close()
+		r = netpipe.run_iters()
+		if r == None:
+			print "Receive exiting"
+			break
 	sys.exit(0)
 
 else:
-	sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-	sock.connect((hostname, port))
-	#this is a HACK so other process executes before we do..
-	time.sleep(0.5)
-	if dummy < 2:
-		netpipe = NPtcp.NPtcp(hostname)
+	# wait a sec for other guy..
+	time.sleep(1)
+	netpipe = NPtcp.NPtcp(hostname)
 	print "NPmodule loaded"
 	'''Variables that go in this loop'''
 	n = inc = totalTime = megaCount = permSize = pertInc =  firstPert = pertCount = 0
@@ -164,14 +146,6 @@ else:
 			sys.stdout.write("%3d: %7d bytes %6d times" % (n, int(size/8), iters))
 			sys.stdout.flush()
 			for i in range(TRIALS):
-				args = (size, iters)
-				txt = pickle.dumps(args)
-				sock.send( txt )
-				args2 = pickle.loads(sock.recv(1024))
-				if args != args2:
-					print "error in sync, exiting!"
-					sock.send( pickle.dumps (None))
-					sys.exit(1);
 				r = netpipe.run_iters(size, iters)
 		     		(size_r, iters_r, tTime, iTime) = r
 				ttimes.append(tTime)

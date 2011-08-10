@@ -21,11 +21,11 @@ char *messbuff;
 
 /* Initialize vars in Init() that may be changed by parsing the command args */
 
-void Init(ArgStruct *p, int* pargc, char*** pargv)
+void Init(Netpipe * self, int* pargc, char*** pargv)
 {
-  p->source_node = 0;  /* Default source node */
-
-  MPI_Init(pargc, pargv);
+	ArgStruct *p = &self->args;
+	p->source_node = 0;  /* Default source node */
+ 	MPI_Init(pargc, pargv);
 }
 
 void Setup(ArgStruct *p)
@@ -151,12 +151,12 @@ void RecvTime(ArgStruct *p, double *t)
 }
 
 
-void SendRepeat(ArgStruct *p, int rpt)
+void SendRepeat(ArgStruct *p, uint32_t rpt)
 {
     MPI_Send(&rpt, 1, MPI_INT, p->prot.nbor, 2, MPI_COMM_WORLD);
 }
 
-void RecvRepeat(ArgStruct *p, int *rpt)
+void RecvRepeat(ArgStruct *p, uint32_t *rpt)
 {
     MPI_Status status;
 

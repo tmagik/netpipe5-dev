@@ -21,11 +21,19 @@
 int doing_reset = 0;
 
 /* FIXME .. change to object? */
-void Init(Netpipe *self)
+void Init(Netpipe *self, int* pargc, char*** pargv)
 {
 	ArgStruct *p = &self->args;
 	p->reset_conn = 0; /* Default to not resetting connection */
 	p->prot.sndbufsz = p->prot.rcvbufsz = 0;
+	p->port = DEFPORT; /* default port of 5000 */
+
+	if (p->tr){
+		p->rcv = 0;
+	} else {
+		printf("Init: inferred receiver\n");
+		p->rcv = 1;
+	}
 }
 
 void Setup(ArgStruct *p)
@@ -283,7 +291,7 @@ void RecvTime(ArgStruct *p, double *t)
     *t = (double)ltime / 1.0e8;
 }
 
-void SendRepeat(ArgStruct *p, int rpt)
+void SendRepeat(ArgStruct *p, uint32_t rpt)
 {
   uint32_t lrpt, nrpt;
 
@@ -297,7 +305,7 @@ void SendRepeat(ArgStruct *p, int rpt)
     }
 }
 
-void RecvRepeat(ArgStruct *p, int *rpt)
+void RecvRepeat(ArgStruct *p, uint32_t *rpt)
 {
   uint32_t lrpt, nrpt;
   int bytesRead;

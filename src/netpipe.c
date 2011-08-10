@@ -19,9 +19,6 @@
  * somehow closed prior to exiting!
  */
 
-static void * buffer = NULL;
-static void * buffer2 = NULL;
-
 static PyObject *
 netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 {
@@ -31,8 +28,22 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 
 	args = &self->args;
 
-	if (!PyArg_ParseTuple(pyargs, "ii", &size, &nrepeat))
-		return NULL;
+	if (!PyArg_ParseTuple(pyargs, "ii", &size, &nrepeat)){
+		if(args->rcv){
+			RecvRepeat(args, &size);
+			RecvRepeat(args, &nrepeat);
+			if (size == 0){ /* signal to exit */
+				return Py_BuildValue("None");
+			}
+		} else { /* bail out */
+			return NULL;
+		}
+	}
+
+	if (args->tr){
+		SendRepeat(args, size);
+		SendRepeat(args, nrepeat);
+	}
 
 	bytes = size / 8;
 	if (size % 8) bytes = bytes + 1;
@@ -41,36 +52,31 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	fprintf(stderr, "size: %d, bytes: %d, nrepeats: %d\n", (int)size, (int)bytes, (int)nrepeat);
 #endif	
 	
-	/* XXX TODO this is not going to work for !TCP */
-#if 0
-	int r;
-	if (!buffer){
-		r = posix_memalign(&buffer, self->bufalign, bytes);
-		if (r){
-			fprintf(stderr, "couldn't allocate memory, posix_memalign returned %d\n", r);
-			return PyErr_NoMemory();
-		}
-	}
-	fprintf(stderr, "address is %p\n", buffer);
 
-#else
+	/* XXX TODO: clean up MyMalloc & other stuff for collectives nicely */
+	//MyMalloc(ArgStruct *p, int bufflen, int ssoffset, int roffset
+	args->bufflen = bytes;
+	MyMalloc(args, args->bufflen, 0, 0);
+	if(args->cache)	args->s_buff = args->r_buff;
+	args->r_ptr = args->r_buff_orig = args->r_buff;
+	args->s_ptr = args->s_buff_orig = args->s_buff;
 
-	buffer = malloc(bytes);
-	if (!buffer){
+	if (args->r_buff_orig == NULL || args->s_buff_orig == NULL){
 		fprintf(stderr, "couldn't allocate memory\n");
 		return PyErr_NoMemory();
 	}
 /*	fprintf(stderr, "address is %p\n", buffer);	 */
-#endif
-	
-	args->bufflen = bytes;
-	args->s_buff = buffer;
-	args->r_buff = buffer;
-	args->s_ptr = buffer;
-	args->r_ptr = buffer;
 	
 	//InitBufferData(args, args->bufflen, args->soffset, args->roffset);
 	InitBufferData(args, args->bufflen, 0,0);
+
+	AfterAlignmentInit(args);  /* MPI-2 needs this to create a window */
+
+	/* Infiniband requires use of asynchronous communications, so we need
+	 * the PrepareToReceive calls below
+	 */
+	if( self->asyncReceive )
+		PrepareToReceive(args);
 
 	Sync(args);    /* Sync to prevent timing artifacts and
 			   race condition in armci module */
@@ -110,13 +116,18 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 #endif
 	}
 
-	/* t is the 1-directional trasmission time */
+	/* t is the 1-directional transmission time */
 
 	t1 = When() - t0;
 	time = t1 / nrepeat;
 
 	/* for now, free the buffer.. later be more intelligent */
-	free(buffer);
+	/* ... probably should use *_buff_orig */
+	if(args->cache)
+		FreeBuff(args->s_buff_orig, NULL);
+	else {
+		FreeBuff(args->s_buff_orig, args->r_buff_orig);
+	}
 	
 	return Py_BuildValue("(i, i, d, d)", 
 			size, nrepeat, t1, time);
@@ -144,33 +155,48 @@ static PyObject *netpipe_object(PyObject *self,
 		
 		strcpy(newobj->s, "np.out");
 
-		if (!temp){
-			fprintf(stderr, "no args, receiver\n");
-			newobj->args.rcv = 1;
-		} else {
+		if(temp){
 			if(strlen(temp) > 254){
-				fprintf(stderr, "XXXXXX you're going to die, host string too big\n");
+				fprintf(stderr, "XXXXX fail: host string too long\n");
 			}
 			strncpy(&newobj->args.host, temp, 255);
 			fprintf(stderr, "transmit, connecting to %s\n",newobj->args.host);
-			newobj->args.tr = 1;
+                        newobj->args.tr = 1;			
 		}
-		
-		Init(newobj);
+
+		/* grab argc/argv */
+		PyObject *sys = PyImport_ImportModule("sys");
+		PyObject *pyargv = PyObject_GetAttrString(sys, "argv");
+		int argc = PyList_Size(pyargv);
+#ifdef DEBUG
+		fprintf(stderr, "init obj argc: %d\n", argc);
+#endif	
+		char **argv = malloc(sizeof(char *) * argc);
+		int i;
+		for (i = 0; i< argc; i++){
+			PyObject *pyarg = PyList_GetItem(pyargv, i);
+			argv[i] = PyString_AsString(pyarg);
+#ifdef DEBUG
+			fprintf(stderr, "argv[%d]: %s\n", i, argv[i]);			
+#endif
+		}
 
 		/* only set things that are not 0 */
-		newobj->args.cache = 1; /* Default to use cache */
-		newobj->args.port = DEFPORT; /* default port of 5000 */
+                //newobj->args.cache = 1; /* Default to use cache */
 
-		Setup(&newobj->args);
+		Init(newobj, &argc, &argv);
+		
+		Setup(&(newobj->args));
 		return (PyObject *)newobj;
 	}
 	return PyErr_NoMemory();
 }
 
+#define NPstring(name) _NPstring(name)
+#define _NPstring(name) #name
 static PyMethodDef TestMethods[] = {
-	{"NPtcp",
-		netpipe_object,
+	{NPstring(NPNAME),
+		(PyCFunction)netpipe_object,
 		METH_VARARGS | METH_KEYWORDS,
 		"TEST!!"},
 	{NULL, NULL, 0, NULL}
@@ -183,8 +209,12 @@ static PyMethodDef TestMethods[] = {
  * all of the Initialization functions and Startup functions required to get
  * the program into a state where we can call Send/Recv() functions.
  */
+
+#define _initmacro(x) init ## x
+#define initmacro(x) _initmacro(x)
+
 PyMODINIT_FUNC
-initNPtcp(void)
+initmacro(NPNAME) (void)
 {
 	//PyObject * module;
 	
@@ -198,8 +228,7 @@ initNPtcp(void)
 	/* NOTE: Setup() needs an ArgStruct parameter, so we will need to parse
 	 * everything before this point!
      */
-
-	(void) Py_InitModule("NPtcp", TestMethods);
+	(void) Py_InitModule(NPstring(NPNAME), TestMethods);
 }
 
 static PyObject * Netpipe_get(Netpipe * self, void *closure)
@@ -209,7 +238,12 @@ static PyObject * Netpipe_get(Netpipe * self, void *closure)
 
 	/* um, this is dumb */
 	if (strcmp(op, "streamopt") == 0) {
-		attr = PyString_FromString("foo");
+		attr = PyInt_FromLong(self->streamopt);
+		return attr;
+	}
+
+	if (strcmp(op, "tr") == 0) {
+		attr = PyInt_FromLong(self->args.tr);
 		return attr;
 	}
 
@@ -234,6 +268,8 @@ static PyMethodDef Netpipe_methods[] = {
 static PyGetSetDef Netpipe_getsets[] = {
 	{"streamopt", (getter)Netpipe_get, NULL, 
 			"Streaming mode flag", "streamopt"},
+	{"tr", (getter)Netpipe_get, NULL, 
+			"We are transmitter", "tr"},
 	{NULL} /* Sentinel */
 };
 
@@ -419,7 +455,8 @@ void ResetRecvPtr(ArgStruct* p)
   p->r_ptr = p->r_ptr_saved;
 }
 
-/* This is generic across all modules */
+/* This is generic across all point to point modules */
+#if !defined(COLLECTIVES)
 void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
 {
   memset(p->r_buff, 'a', nbytes+MAX(soffset,roffset));
@@ -446,29 +483,36 @@ void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
 
 void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset)
 {
-    if((p->r_buff=(char *)malloc(bufflen+MAX(soffset,roffset)))==(char *)NULL)
-    {
-        fprintf(stderr,"couldn't allocate memory for receive buffer\n");
-        exit(-1);
-    }
-       /* if pcache==1, use cache, so this line happens only if flushing cache */
+	if((p->r_buff=(char *)malloc(bufflen+MAX(soffset,roffset)))==(char *)NULL)
+	{
+		fprintf(stderr,"couldn't allocate memory for receive buffer\n");
+		exit(-1);
+	}
+	/* if pcache==1, use cache, so this line happens only if flushing cache */
 
-	if(!p->cache) /* Allocate second buffer if limiting cache */
+	if(!p->cache) { /* Allocate second buffer if limiting cache */ 
 		if((p->s_buff=(char *)malloc(bufflen+soffset))==(char *)NULL) {
 			fprintf(stderr,"couldn't allocate memory for send buffer\n");
 			exit(-1);
 		}
+	}
+#ifdef DEBUG
+	fprintf(stderr, "MyMalloc: p->r_buff %p, p->s_buff %p\n", p->r_buff, p->s_buff);
+#endif
 }
 
 void FreeBuff(char *buff1, char *buff2)
 {
+#ifdef DEBUG
+	fprintf(stderr, "FreeBuff(buff1 %p, buff2 %p)\n", buff1, buff2);
+#endif
 	if(buff1 != NULL)
 		free(buff1);
-
 	if(buff2 != NULL)
 		free(buff2);
 }
 
+#endif /* COLLECTIVES */
 #endif
 
 /*
