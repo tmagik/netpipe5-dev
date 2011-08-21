@@ -159,7 +159,7 @@ static PyObject *netpipe_object(PyObject *self,
 			if(strlen(temp) > 254){
 				fprintf(stderr, "XXXXX fail: host string too long\n");
 			}
-			strncpy(&newobj->args.host, temp, 255);
+			strncpy((char *)&newobj->args.host, temp, 255);
 			fprintf(stderr, "transmit, connecting to %s\n",newobj->args.host);
                         newobj->args.tr = 1;			
 		}
@@ -247,6 +247,17 @@ static PyObject * Netpipe_get(Netpipe * self, void *closure)
 		return attr;
 	}
 
+#if defined(COLLECTIVES)
+	if (strcmp(op, "iproc") == 0){
+		attr = PyInt_FromLong(self->args.prot.iproc);
+		return attr;
+	}
+	if (strcmp(op, "nprocs") == 0){
+		attr = PyInt_FromLong(self->args.prot.nprocs);
+		return attr;
+	}
+#endif /* COLLECTIVES */
+
 	/* if execution gets here, this is an error */
 	PyErr_SetString(PyExc_RuntimeError, "request for unknown Netpipe attribute");
 	return NULL;
@@ -270,6 +281,12 @@ static PyGetSetDef Netpipe_getsets[] = {
 			"Streaming mode flag", "streamopt"},
 	{"tr", (getter)Netpipe_get, NULL, 
 			"We are transmitter", "tr"},
+#if defined(COLLECTIVES) 
+	{"iproc", (getter)Netpipe_get, NULL, 
+			"Index of current process(rank)", "iproc"},
+	{"nprocs", (getter)Netpipe_get, NULL, 
+			"Number of processes(ranks)", "nprocs"},
+#endif /* COLLECTIVES */
 	{NULL} /* Sentinel */
 };
 
