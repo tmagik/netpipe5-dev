@@ -9,7 +9,9 @@
 void Init(Netpipe * self, int *pargc, char ***pargv)
 {
 	ArgStruct *p = &self->args;
+#ifdef DEBUG
 	char s[255], *ptr;
+#endif
 	
 	MPI_Init(pargc,pargv);	
 	MPI_Comm_rank(MPI_COMM_WORLD,&p->prot.iproc);
@@ -25,16 +27,20 @@ void Init(Netpipe * self, int *pargc, char ***pargv)
 		p->rcv=1;
 	}
 	
-	if(p->prot.nprocs < 2)
-	{
-		printf("Need at least two processes (given only %d) \n", p->prot.nprocs);
-		exit(-1);
+	if(p->prot.iproc == 0 || p->prot.iproc == (p->prot.nprocs-1)){
+		/* do this more than once, but less than thousands of times */
+		if(p->prot.nprocs < 2)
+		{
+			printf("Need at least two processes (given only %d) \n", p->prot.nprocs);
+			exit(-1);
+		}
+		if(p->prot.nprocs>MAXPROCS)
+		{
+			printf("Requested %d exceededs compile-time max of %d\n", p->prot.nprocs, MAXPROCS);
+			exit(-2);
+		}
 	}
-	if(p->prot.nprocs>MAXPROCS)
-	{
-		printf(" Exceeded the manimum number of proceeses \n");
-		exit(-2);
-	}
+#ifdef DEBUG
 	gethostname(s,253);
 	/* Get the Name alone from the Fully Qualified Domain Name */
 	if(s[0]!='.'){
@@ -43,7 +49,7 @@ void Init(Netpipe * self, int *pargc, char ***pargv)
 	}
 	printf("%d: %s\n", p->prot.iproc,s);
 	fflush(stdout);
-	
+#endif /* DEBUG */
 	
 }	
 

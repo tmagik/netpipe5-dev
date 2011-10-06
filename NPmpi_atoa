@@ -1,0 +1,258 @@
+#!/usr/bin/env python
+
+'''
+NetPIPE 5 Python wrapper for MPI_AlltoAll module
+TODO: abstract the common functions into an object-oriented 'netpipe' module
+Copyright 2004-2011 Troy Benjegerdes, Torrey Dupras, Rachel Mansbach
+
+This file is part of the NetPIPE package
+
+<include verbose GPL stuff>
+    This file is part of NetPIPE.
+
+    NetPIPE is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    NetPIPE is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+</gpl>
+
+In other words, I found this program quite useful, and I wanted to share
+it with other people who might find it useful, and in the hopes that any
+who might do so will contribute any useful additions they develop back to
+the community so that we can all have faster (and more reliable) networks
+and interconnects. -- Troy
+'''
+
+import os, sys
+setpath = 1
+if setpath:
+	import distutils.util
+	platform = distutils.util.get_platform()
+	version = '%d.%d' % (sys.version_info[0], sys.version_info[1])
+	# probably unixism here
+	sys.path.append ("%s/build/lib.%s-%s" % (os.getcwd(), platform, version))
+	#print sys.path
+
+import socket
+import pickle
+import sys
+import NPmpi_atoa
+import time
+import timeit
+import decimal
+import math
+
+#duplicate NP3 constants from netpipe.h
+STOPTM = 0.1
+#ifdef FINAL
+#TRIALS = 7
+#RUNTM =  0.25
+#else
+TRIALS = 3
+RUNTM = 0.10
+
+#RUNTM = .5	# try to pick iterations to get RUNTM seconds per trial
+STOPTM = RUNTM  # stop when fastest one-way time is longer than STOPTM
+
+'''Functions that are used in this demo'''
+###########################################################################
+'''increment function'''
+def incFunc(n, inc):
+	inc = inc/8
+	if n <= 2:
+		inc = 2
+	elif 3 <= n <= 5:
+		inc = 4
+	elif 6 <= n <= 8:
+		inc = 7
+	elif 9 <= n <= 14:
+		inc = 8
+	else:
+		if n > 2:
+			if n%2: # n is odd
+				inc = inc + inc
+			else:  # n is even
+				inc = inc
+	return inc*8
+
+'''size function'''
+def sizeFunc(size, pert):
+	size = size + pert
+	return size
+
+def pertFunc(n, inc, firstpert):
+	''' We implement the following NP3 C code in a rather different way
+	           /* Exponentially increase the block size.  */
+
+       if (nq > 2) inc = ((nq % 2))? inc + inc: inc;
+       
+          /* This is a perturbation loop to test nearby values */
+
+       for (pert = ((perturbation > 0) && (inc > perturbation+1)) ? -perturbation : 0;
+            pert <= perturbation; 
+            n++, pert += ((perturbation > 0) && (inc > perturbation+1)) ? perturbation : perturbation+1)
+       {
+        '''
+	if n <= 2:
+		pertList = [-8,0,8]
+	elif 3 <= n <= 5:
+		pertList = [-16,0,16]
+	elif 6 <= n <= 8:
+		pertList = [-8,0,24]
+	elif 9 <= n <= 14:
+		pertList = [-16,0,24]
+	else:
+		pertList = [firstpert,0,24]
+	return pertList
+	
+def iterFunc(tlast, oldsize, newsize):
+	'''duplicate netpipe.c code
+		nrepeat = MAX((RUNTM / ((double)args.bufflen /
+                                  (args.bufflen - inc + 1.0) * tlast)),TRIALS);
+	'''
+	iters = int(RUNTM*oldsize/(tlast*newsize))
+	#iters = max(int((RUNTM*bw)/(size)), TRIALS)	
+	return max(iters, TRIALS)
+
+# TODO clean up checkforRT and sendRT to use an clean object, as well
+# as stat the file every check
+sock = None
+ADDR = None
+MYPORT = 29543
+
+def checkforRT(host=None):
+	fname = "/tmp/NPRTHOST"
+	global sock, ADDR
+	if ADDR:
+		return
+	
+	if not sock:	
+		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+	if not host:
+		try:
+			f = open(fname)
+		except IOError:
+			return None
+		host = f.read().strip()
+		print "Found new %s, sending to host %s" % (fname, host)
+	ADDR = (host, MYPORT)
+	return
+
+def sendRT(data):
+	global sock, ADDR
+	if ADDR:
+		sock.sendto("(%s,%s)" % (repr(time.time()), data), ADDR)
+
+#f = sock
+#sock.connect(ADDR)
+#f = sock.makefile(sock)
+f = None
+
+if len(sys.argv) == 2:
+	checkforRT(sys.argv[1])
+
+data_stdout = True
+
+netpipe = NPmpi_atoa.NPmpi_atoa()
+if netpipe.tr:
+	str =  "<<NP5 start>> %d of %d nodes\n" % (
+		netpipe.iproc, netpipe.nprocs)
+	str += "SHA256: " + os.popen("sha256sum %s" % sys.argv[0]).read()
+	str += "STOPTM: %f\t   RUNTM: %f\t   TRIALS: %d\t" % (
+		STOPTM, 	RUNTM,  	TRIALS,)
+	str += "<</NP5 start>>\n"
+	sys.stdout.write(str)
+	sys.stdout.flush()
+	#sys.stderr.write(str)
+	#sys.stderr.flush()
+
+'''Variables that go in this loop'''
+n = inc = totalTime = megaCount = permSize = pertInc =  firstPert = pertCount = 0
+iters = 1000
+count = 1
+pertList = [-1,0,1]
+size = size_r = 8
+rate = 0.3*(1e6)
+iterationTime = (200/(1e6) ) * 4 * math.log(netpipe.nprocs)
+
+if netpipe.tr:
+	'''main loop: using a counter as a temporary switch'''	
+	while iterationTime < STOPTM:
+		checkforRT()
+		previousInc = inc
+		if count%6==0:
+			pertList[0] = -inc+pert[0]
+		inc = incFunc(n,inc)
+		permSize = permSize + inc
+		pert = pertFunc(n, previousInc, pertList[0])
+		pertList = pert
+		for pertrun in range(3):
+			oldsize = size
+			size = permSize + pert[pertrun]
+			iters =  iterFunc(iterationTime, oldsize, size)
+			#three runs of same size packet and take the lowest time of the runs
+			ttimes = []
+			itimes = []
+			sys.stdout.write("%3d: %7d bytes %6d times" % (n, int(size/8), iters))
+			sys.stdout.flush()
+			for i in range(TRIALS):
+				r = netpipe.run_iters(size, iters)
+				sendRT(repr(r))
+				(size_r, iters_r, tTime, iTime) = r
+				ttimes.append(tTime)
+				itimes.append(iTime)
+				sys.stdout.write("-")
+				sys.stdout.flush()
+			totalTime = min(ttimes)
+			iterationTime = min(itimes)
+			totalTime = min(ttimes) 
+			# iterationTime is total round trip time, divide by 2 for one-way time
+			onewayTime = iterationTime/2
+			# multiply by 2 because we sent size * iterations * 2
+			rate = ((size_r*iters_r*2)/(totalTime))
+			output = "%12d %15.2lf %12.8lf %8d" % (int(size_r/8),rate/(1e6),onewayTime,iters_r)
+			for i in range(TRIALS):
+				output = output + " %12.9lf" % (ttimes[i])
+			output = output + "\n" 
+			if f:
+				f.write(output)
+			if data_stdout:
+				sys.stdout.write("> %s" % output)
+			else:
+				sys.stdout.write("> %8.2lf Mbps in %10.2lf usec\n" % 
+					( rate/(1e6),onewayTime*(1e6)))
+			n = n + 1	
+			if n >= 11:
+				count = count + 1
+
+else: #we are receiver
+	while True:
+		checkforRT()
+		r =	netpipe.run_iters()
+		sendRT(repr(r))
+		if r == None:
+			print "Receive exiting"
+			break
+
+if f:
+	f.close()
+
+print "<<NP5 end>> %d of %d nodes <</NP5 end>>" % (
+		netpipe.iproc, netpipe.nprocs)
+
+# Local variables:
+#  c-indent-level: 4
+#  c-basic-offset: 4
+# End:
+#
+# vim: ts=4 sts=4 sw=4 noexpandtab 
+
