@@ -319,6 +319,8 @@ void CleanUp(ArgStruct *p);
 
 void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset);
 
+void CheckBufferData(ArgStruct *p, int nbytes, int soffset, int roffset);
+
 void MyMalloc(ArgStruct *p, int bufflen, int soffset, int roffset);
 
 void Reset(ArgStruct *p);

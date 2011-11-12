@@ -121,6 +121,8 @@ netpipe_run_iters(Netpipe *self, PyObject *pyargs)
 	t1 = When() - t0;
 	time = t1 / nrepeat;
 
+	CheckBufferData(args, args->bufflen, 0,0);
+
 	/* for now, free the buffer.. later be more intelligent */
 	/* ... probably should use *_buff_orig */
 	if(args->cache)
@@ -265,8 +267,9 @@ static PyObject * Netpipe_get(Netpipe * self, void *closure)
 
 static void Netpipe_dealloc(Netpipe *self)
 {
+#ifdef DEBUG
 	fprintf(stderr, "dealloc netpipe object %p", self);
-
+#endif
 	self->ob_type->tp_free((PyObject *)self);
 }
     
@@ -472,28 +475,113 @@ void ResetRecvPtr(ArgStruct* p)
   p->r_ptr = p->r_ptr_saved;
 }
 
+#ifndef LFSR
+#define LFSR lfsr23
+#endif
+
+/* taken from Wikipedia example, galois LFSR code */
+uint32_t lfsr_data = 0;
+inline uint32_t lfsr32(void)
+{
+	/* taps 32 31 29 1; characteristic polynomial: x^32 + x^31 + x^29 + x + 1 */
+	lfsr_data = (lfsr_data >> 1) ^ (-(lfsr_data & 1u) & 0xD0000001u);
+	return lfsr_data;
+}
+
+/* 10GigE 64/66 polynomial -- needs rework of code for 64 bit lfsr */
+inline uint64_t lfsr58(void)
+{
+	/* http://en.wikipedia.org/wiki/64b/66b_encoding: x^58 + x^38 + 1 */
+	lfsr_data = (lfsr_data >> 1) ^ (-(lfsr_data & 1u) & 0x200002000000000u);
+	return lfsr_data;
+}
+
+/* PCI-e Gen3 polynomial */
+inline uint32_t lfsr23(void)
+{
+	/* characteristic polynomial: x^23 + x^5 + 1 */
+
+	lfsr_data = (lfsr_data >> 1) ^ (-(lfsr_data & 1u) & 0x400010u);
+	return lfsr_data;
+}
+
+void lfsrset(void *s, int c, size_t n)
+{
+	size_t i, end, rem, inc;
+	inc = 4; /* must match sizeof(lfsr_data */
+	end = n & ~(inc-1);
+	rem = n & (inc-1);
+	
+	lfsr_data = c;
+	
+	for (i=0; i < end; i += inc){
+		((uint32_t *)s)[i>>2] = LFSR();
+	}
+	uint32_t last_lsfr = LFSR();
+	for (i=0; i < rem; i++){
+		((char *)s)[i+end] = ((char *)&last_lsfr)[i];
+	}
+}
+
+void lfsrcheck(void *s, int c, size_t n)
+{
+	size_t i, end, rem, inc;
+	inc = 4; /* must match sizeof(lfsr_data */
+	end = n & ~(inc-1);
+	rem = n & (inc-1);
+	
+	lfsr_data = c;
+	
+	for (i=0; i < end; i += inc){
+		uint32_t *dat;
+		dat = &((uint32_t *)s)[i>>2];
+		if (*dat != LFSR()){
+			printf("DATA MISMATCH index %ld %p expect 0x%x got 0x%x\n",
+				i, dat, lfsr_data, *dat);
+		}
+	}
+	uint32_t last_lfsr = LFSR();
+	for (i=0; i < rem; i++){
+		char *chrdat;
+		chrdat = &((char *)s)[i+end];
+		if (*chrdat != ((char *)&last_lfsr)[i]){
+			printf("DATA MISMATCH index %ld %p expect 0x%x got 0x%x\n",
+				i+end, chrdat, ((char *)&last_lfsr)[i], *chrdat);
+		}
+	}
+}
+
 /* This is generic across all point to point modules */
 #if !defined(COLLECTIVES)
 void InitBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
 {
-  memset(p->r_buff, 'a', nbytes+MAX(soffset,roffset));
+	//memset(p->r_buff, 'a', nbytes+MAX(soffset,roffset));
+	lfsrset(p->r_buff, 'a', nbytes+MAX(soffset,roffset));
 
-  /* If using cache mode, then we need to initialize the last byte
-   * to the proper value since the transmitter and receiver are waiting
-   * on different values to determine when the message has completely
-   * arrive.
-   */   
-  if(p->cache)
+	/* If using cache mode, then we need to initialize the last byte
+	 * to the proper value since the transmitter and receiver are waiting
+	 * on different values to determine when the message has completely
+	 * arrive.
+	 */   
+	if(p->cache)
+		//p->r_buff[(nbytes+MAX(soffset,roffset))-1] = 'a' + p->tr;
+    		p->r_buff[(nbytes+MAX(soffset,roffset))-1] = 0; /* lfsr will never produce 0 */
 
-    p->r_buff[(nbytes+MAX(soffset,roffset))-1] = 'a' + p->tr;
+	/* If using no-cache mode, then we have distinct send and receive
+	 * buffers, so the send buffer starts out containing different values
+	 * from the receive buffer
+	 */
+	else	/* TODO: init based on rank instead of just 'a' or 'b' */
+    		//memset(p->s_buff, 'b', nbytes+soffset);
+		lfsrset(p->s_buff, 'b', nbytes+MAX(soffset,roffset));
+}
 
-  /* If using no-cache mode, then we have distinct send and receive
-   * buffers, so the send buffer starts out containing different values
-   * from the receive buffer
-   */
-  else
-
-    memset(p->s_buff, 'b', nbytes+soffset);
+void CheckBufferData(ArgStruct *p, int nbytes, int soffset, int roffset)
+{
+	/* ASSUMPTION: we do not need to check the send buffer again.
+	   We should probably provide an option to check if one is
+	   paranoid trying to find random data corruption */
+	lfsrcheck(p->r_buff, 'b', nbytes+MAX(soffset,roffset));
 }
 
 #if !defined(OPENIB) && !defined(INFINIBAND) && !defined(ARMCI) && !defined(LAPI) && !defined(GPSHMEM) && !defined(SHMEM) && !defined(GM) 
